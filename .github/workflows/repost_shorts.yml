@@ -37,21 +37,21 @@ jobs:
         run: |
           pip install --upgrade pip
           pip install \
-            yt-dlp \
+            yt-dlp[default] \
             google-auth \
             google-auth-oauthlib \
             google-auth-httplib2 \
             google-api-python-client
 
-      - name: 🍪 Write YouTube cookies (if provided)
+      - name: 🍪 Write YouTube cookies
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
           if [ -n "$YOUTUBE_COOKIES" ]; then
             printf '%s' "$YOUTUBE_COOKIES" > $GITHUB_WORKSPACE/cookies.txt
-            echo "Cookies written."
+            echo "✅ Cookies written ($(wc -l < $GITHUB_WORKSPACE/cookies.txt) lines)."
           else
-            echo "No cookies secret found – proceeding without cookies."
+            echo "⚠️ No YOUTUBE_COOKIES secret found – skipping."
           fi
 
       - name: 🔍 Dry run check
