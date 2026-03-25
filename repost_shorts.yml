@@ -1,0 +1,96 @@
+name: 📹 Daily YouTube Shorts Reposter
+
+on:
+  # Runs every day at 10:00 AM UTC — change to your preferred time
+  schedule:
+    - cron: "0 10 * * *"
+
+  # Also allow manual trigger (useful for testing or catching up)
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run — list next Short but don't upload"
+        required: false
+        default: "false"
+
+jobs:
+  repost:
+    name: Download & Repost Next Short
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write   # needed to push progress.json back to repo
+
+    steps:
+      # ── 1. Checkout repo (includes progress.json) ──────────────────────────
+      - name: ⬇ Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # ── 2. Python setup ────────────────────────────────────────────────────
+      - name: 🐍 Set up Python 3.11
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      # ── 3. Install dependencies ────────────────────────────────────────────
+      - name: 📦 Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install \
+            yt-dlp \
+            google-auth \
+            google-auth-oauthlib \
+            google-auth-httplib2 \
+            google-api-python-client
+
+      # ── 4. Write OAuth token from secret ──────────────────────────────────
+      #    Store your YouTube OAuth token JSON as a GitHub secret named
+      #    YOUTUBE_TOKEN_JSON (see README for how to generate it)
+      - name: 🔐 Write YouTube OAuth token
+        run: echo '${{ secrets.YOUTUBE_TOKEN_JSON }}' > token.json
+
+      # ── 5. Dry run — just print what would be posted ──────────────────────
+      - name: 🔍 Dry run check
+        if: ${{ github.event.inputs.dry_run == 'true' }}
+        env:
+          SOURCE_CHANNEL_ID: ${{ secrets.SOURCE_CHANNEL_ID }}
+        run: |
+          python - <<'EOF'
+          import json, os, sys
+          sys.path.insert(0, "scripts")
+          from repost_short import fetch_all_shorts, load_progress
+          progress = load_progress()
+          posted   = set(progress["posted_ids"])
+          shorts   = fetch_all_shorts(os.environ["SOURCE_CHANNEL_ID"])
+          remaining = [s for s in shorts if s["id"] not in posted]
+          print(f"Total Shorts : {len(shorts)}")
+          print(f"Posted so far: {len(posted)}")
+          print(f"Remaining    : {len(remaining)}")
+          if remaining:
+              n = remaining[0]
+              print(f"\nNext to post :")
+              print(f"  Title : {n['title']}")
+              print(f"  Date  : {n['upload_date']}")
+              print(f"  URL   : {n['url']}")
+          EOF
+
+      # ── 6. Run the reposter ────────────────────────────────────────────────
+      - name: 🚀 Repost next Short
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          SOURCE_CHANNEL_ID:         ${{ secrets.SOURCE_CHANNEL_ID }}
+          YOUTUBE_TOKEN_JSON:        ${{ secrets.YOUTUBE_TOKEN_JSON }}
+          YOUTUBE_CLIENT_SECRET_JSON: ${{ secrets.YOUTUBE_CLIENT_SECRET_JSON }}
+        run: python scripts/repost_short.py
+
+      # ── 7. Commit updated progress.json back to repo ──────────────────────
+      - name: 💾 Commit progress
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add progress.json
+          git diff --cached --quiet || git commit -m "chore: update repost progress [skip ci]"
+          git push
