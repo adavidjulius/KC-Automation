@@ -29,6 +29,9 @@ PROGRESS_FILE       = Path("progress.json")
 CREDENTIALS_FILE    = Path("credentials.json")           # OAuth2 client secret
 TOKEN_FILE          = Path("token.json")                 # saved access token
 DOWNLOAD_DIR        = Path("downloads")
+# cookies.txt is written to the repo root by the workflow
+# Path resolves relative to where the script is called from (repo root)
+COOKIES_FILE        = Path(os.environ.get("COOKIES_FILE", "cookies.txt"))
 SCOPES              = ["https://www.googleapis.com/auth/youtube.upload",
                        "https://www.googleapis.com/auth/youtube"]
 # ───────────────────────────────────────────────────────────────────────────────
@@ -101,6 +104,7 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
         "extract_flat": True,
         "playlistend": 9999,
         "ignoreerrors": True,
+        **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
     }
 
     entries = []
@@ -146,6 +150,7 @@ def download_short(video: dict) -> dict:
         "writeannotations": False,
         "quiet": False,
         "merge_output_format": "mp4",
+        **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
     }
 
     with yt_dlp.YoutubeDL(ydl_opts) as ydl:
