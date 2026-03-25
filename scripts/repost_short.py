@@ -24,13 +24,11 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
-SOURCE_CHANNEL_ID   = os.environ["SOURCE_CHANNEL_ID"]   # e.g. UCxxxxxxxxxxxxxx
+SOURCE_CHANNEL_ID   = os.environ["SOURCE_CHANNEL_ID"]   # e.g. UCxxxxxxxxxxxxxx or @handle
 PROGRESS_FILE       = Path("progress.json")
 CREDENTIALS_FILE    = Path("credentials.json")           # OAuth2 client secret
 TOKEN_FILE          = Path("token.json")                 # saved access token
 DOWNLOAD_DIR        = Path("downloads")
-# cookies.txt is written to the repo root by the workflow
-# Path resolves relative to where the script is called from (repo root)
 COOKIES_FILE        = Path(os.environ.get("COOKIES_FILE", "cookies.txt"))
 SCOPES              = ["https://www.googleapis.com/auth/youtube.upload",
                        "https://www.googleapis.com/auth/youtube"]
@@ -68,7 +66,6 @@ def get_youtube_client():
             "  YOUTUBE_CLIENT_SECRET"
         )
 
-    # Build credentials from the raw values
     creds = Credentials(
         token         = access_token or None,
         refresh_token = refresh_token,
@@ -78,7 +75,6 @@ def get_youtube_client():
         scopes        = SCOPES,
     )
 
-    # Auto-refresh if expired (happens every hour — refresh_token keeps it alive forever)
     if not creds.valid:
         print("  🔄 Access token expired — refreshing automatically…")
         creds.refresh(Request())
@@ -92,18 +88,26 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
     Use yt-dlp to list ALL Shorts from the channel, sorted oldest → newest.
     Returns list of dicts with id, title, upload_date.
     """
-    shorts_url = f"https://www.youtube.com/@{channel_id}/shorts"
-    # Try both URL formats
-    urls_to_try = [
-        f"https://www.youtube.com/@{channel_id}/shorts",
-        f"https://www.youtube.com/channel/{channel_id}/shorts",
-    ]
+    # Build URLs: handle both @handle and UCxxxxxx formats
+    if channel_id.startswith("@"):
+        urls_to_try = [
+            f"https://www.youtube.com/{channel_id}/shorts",
+            f"https://www.youtube.com/channel/{channel_id}/shorts",  # fallback
+        ]
+    else:
+        urls_to_try = [
+            f"https://www.youtube.com/channel/{channel_id}/shorts",
+            f"https://www.youtube.com/@{channel_id}/shorts",
+        ]
 
     ydl_opts = {
         "quiet": True,
         "extract_flat": True,
         "playlistend": 9999,
         "ignoreerrors": True,
+        "extractor_args": {
+            "youtubetab": ["skip=authcheck"],   # bypass auth check for public playlists
+        },
         **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
     }
 
@@ -113,21 +117,23 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
             try:
                 info = ydl.extract_info(url, download=False)
                 if info and info.get("entries"):
-                    entries = [
-                        {
+                    for e in info["entries"]:
+                        if not e or not e.get("id"):
+                            continue
+                        # Use upload_date if available, otherwise default to 19000101
+                        upload_date = e.get("upload_date", "19000101")
+                        # If upload_date is invalid, try to fetch it from the video's info later? skip for now.
+                        entries.append({
                             "id": e["id"],
                             "title": e.get("title", ""),
-                            "upload_date": e.get("upload_date", "19000101"),
+                            "upload_date": upload_date,
                             "url": f"https://www.youtube.com/watch?v={e['id']}",
-                        }
-                        for e in info["entries"]
-                        if e and e.get("id")
-                    ]
+                        })
                     break
             except Exception as ex:
                 print(f"  Warning: {url} → {ex}")
 
-    # Sort oldest first (upload_date = YYYYMMDD string)
+    # Sort by upload_date (oldest first)
     entries.sort(key=lambda x: x["upload_date"])
     return entries
 
@@ -140,7 +146,9 @@ def download_short(video: dict) -> dict:
 
     ydl_opts = {
         "outtmpl": out_tmpl,
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        # More robust format selection: best video+audio that can be merged to mp4
+        "format": "bestvideo+bestaudio/best",
+        "merge_output_format": "mp4",
         "writesubtitles": True,
         "writeautomaticsub": True,
         "subtitleslangs": ["en", "en-US"],
@@ -149,7 +157,12 @@ def download_short(video: dict) -> dict:
         "writedescription": True,
         "writeannotations": False,
         "quiet": False,
-        "merge_output_format": "mp4",
+        "extractor_args": {
+            "youtube": {
+                "skip": ["dash", "hls"],   # avoid DASH/HLS issues
+                "player_client": ["android", "web"],  # try different clients
+            }
+        },
         **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
     }
 
@@ -181,10 +194,10 @@ def upload_to_youtube(youtube, meta: dict) -> str:
     """Upload video to YOUR channel. Returns new video ID."""
     body = {
         "snippet": {
-            "title":       meta["title"][:100],   # YouTube max title length
+            "title":       meta["title"][:100],
             "description": meta["description"][:5000],
             "tags":        meta["tags"][:500],
-            "categoryId":  "22",                  # People & Blogs default
+            "categoryId":  "22",
         },
         "status": {
             "privacyStatus":           "public",
@@ -196,7 +209,7 @@ def upload_to_youtube(youtube, meta: dict) -> str:
         str(meta["video_path"]),
         mimetype="video/mp4",
         resumable=True,
-        chunksize=1024 * 1024 * 5,  # 5 MB chunks
+        chunksize=1024 * 1024 * 5,
     )
 
     print(f"  ⬆  Uploading: {meta['title']}")
@@ -247,7 +260,6 @@ def cleanup(video_id: str):
         f.unlink(missing_ok=True)
 
 
-# ─── MAIN ──────────────────────────────────────────────────────────────────────
 def main():
     print(f"\n{'='*60}")
     print(f"  YouTube Shorts Auto-Reposter  |  {datetime.now():%Y-%m-%d %H:%M}")
@@ -264,9 +276,9 @@ def main():
         print("❌ No Shorts found. Check SOURCE_CHANNEL_ID.")
         sys.exit(1)
 
-    # Find the next unposted Short
+    # Find the next unposted Short (oldest first)
     next_video = None
-    for video in all_shorts:   # already sorted oldest → newest
+    for video in all_shorts:
         if video["id"] not in posted:
             next_video = video
             break
