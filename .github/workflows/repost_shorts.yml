@@ -1,9 +1,9 @@
-name: Daily YouTube Upload
+name: Daily Upload
 
 on:
+  workflow_dispatch:
   schedule:
     - cron: "0 10 * * *"
-  workflow_dispatch:
 
 jobs:
   run:
@@ -16,9 +16,9 @@ jobs:
       - name: Setup Python
         uses: actions/setup-python@v4
         with:
-          python-version: "3.10"
+          python-version: "3.11"
 
-      - name: Install dependencies
+      - name: Install deps
         run: pip install -r requirements.txt
 
       - name: Run script
