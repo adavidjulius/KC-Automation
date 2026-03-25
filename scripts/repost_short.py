@@ -10,15 +10,12 @@ repost_short.py
 
 import json
 import os
-import subprocess
 import sys
-import time
 from pathlib import Path
 from datetime import datetime
 
 import yt_dlp
 from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
@@ -26,8 +23,6 @@ from googleapiclient.http import MediaFileUpload
 # ─── CONFIG ────────────────────────────────────────────────────────────────────
 SOURCE_CHANNEL_ID   = os.environ["SOURCE_CHANNEL_ID"]   # e.g. UCxxxxxxxxxxxxxx or @handle
 PROGRESS_FILE       = Path("progress.json")
-CREDENTIALS_FILE    = Path("credentials.json")           # OAuth2 client secret
-TOKEN_FILE          = Path("token.json")                 # saved access token
 DOWNLOAD_DIR        = Path("downloads")
 COOKIES_FILE        = Path(os.environ.get("COOKIES_FILE", "cookies.txt"))
 SCOPES              = ["https://www.googleapis.com/auth/youtube.upload",
@@ -122,7 +117,6 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
                             continue
                         # Use upload_date if available, otherwise default to 19000101
                         upload_date = e.get("upload_date", "19000101")
-                        # If upload_date is invalid, try to fetch it from the video's info later? skip for now.
                         entries.append({
                             "id": e["id"],
                             "title": e.get("title", ""),
@@ -146,21 +140,20 @@ def download_short(video: dict) -> dict:
 
     ydl_opts = {
         "outtmpl": out_tmpl,
-        # More robust format selection: best video+audio that can be merged to mp4
-        "format": "bestvideo+bestaudio/best",
+        # Format: best MP4 video + M4A audio, or fallback to best MP4
+        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
         "merge_output_format": "mp4",
         "writesubtitles": True,
         "writeautomaticsub": True,
-        "subtitleslangs": ["en", "en-US"],
+        "subtitleslangs": ["en"],
         "subtitlesformat": "srt",
         "writethumbnail": False,
         "writedescription": True,
-        "writeannotations": False,
         "quiet": False,
         "extractor_args": {
             "youtube": {
-                "skip": ["dash", "hls"],   # avoid DASH/HLS issues
-                "player_client": ["android", "web"],  # try different clients
+                "skip": ["dash", "hls"],               # avoid problematic streams
+                "player_client": ["web"],              # web client works with cookies
             }
         },
         **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
