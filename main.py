@@ -1,14 +1,14 @@
 import os
 import subprocess
+import json
 import requests
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 # ========================
-# ENV VARIABLES (STRICT)
+# ENV (YOUR NAMES ONLY)
 # ========================
-API_KEY = os.getenv("YOUTUBE_API_KEY")
 CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID")
 
 CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
@@ -18,178 +18,141 @@ REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN")
 UPLOADED_FILE = "uploaded.txt"
 
 # ========================
-# HARD FAIL (NO SILENT BUGS)
+# VALIDATION
 # ========================
 required = {
-    "YOUTUBE_API_KEY": API_KEY,
     "SOURCE_CHANNEL_ID": CHANNEL_ID,
     "YOUTUBE_CLIENT_ID": CLIENT_ID,
     "YOUTUBE_CLIENT_SECRET": CLIENT_SECRET,
     "YOUTUBE_REFRESH_TOKEN": REFRESH_TOKEN,
 }
 
-for key, value in required.items():
-    if not value:
-        raise Exception(f"Missing ENV: {key}")
+for k, v in required.items():
+    if not v:
+        raise Exception(f"Missing ENV: {k}")
 
-print("All ENV variables loaded ✅")
+print("ENV OK ✅")
 
 # ========================
-# TOKEN HANDLING
+# TOKEN
 # ========================
 def get_access_token():
-    url = "https://oauth2.googleapis.com/token"
-
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "refresh_token": REFRESH_TOKEN,
-        "grant_type": "refresh_token",
-    }
-
-    res = requests.post(url, data=data).json()
+    res = requests.post(
+        "https://oauth2.googleapis.com/token",
+        data={
+            "client_id": CLIENT_ID,
+            "client_secret": CLIENT_SECRET,
+            "refresh_token": REFRESH_TOKEN,
+            "grant_type": "refresh_token",
+        }
+    ).json()
 
     if "access_token" not in res:
-        raise Exception(f"Token Error: {res}")
+        raise Exception(f"Token error: {res}")
 
     return res["access_token"]
 
 
 def get_credentials():
-    access_token = get_access_token()
-
-    creds = Credentials(
-        token=access_token,
+    return Credentials(
+        token=get_access_token(),
         refresh_token=REFRESH_TOKEN,
         token_uri="https://oauth2.googleapis.com/token",
         client_id=CLIENT_ID,
         client_secret=CLIENT_SECRET
     )
-    return creds
-
 
 # ========================
-# TRACK UPLOADED VIDEOS
+# TRACK UPLOADED
 # ========================
-def get_uploaded_videos():
+def get_uploaded():
     if not os.path.exists(UPLOADED_FILE):
         return set()
-    with open(UPLOADED_FILE, "r") as f:
-        return set(f.read().splitlines())
+    return set(open(UPLOADED_FILE).read().splitlines())
 
 
-def save_uploaded(video_id):
+def save_uploaded(vid):
     with open(UPLOADED_FILE, "a") as f:
-        f.write(video_id + "\n")
-
+        f.write(vid + "\n")
 
 # ========================
-# FETCH VIDEOS (API KEY ONLY)
+# FETCH LATEST VIDEO (NO API KEY)
 # ========================
-def get_latest_videos():
-    youtube = build(
-        "youtube",
-        "v3",
-        developerKey=API_KEY,
-        cache_discovery=False
+def get_latest_video():
+    url = f"https://www.youtube.com/channel/{CHANNEL_ID}/videos"
+
+    result = subprocess.run(
+        ["yt-dlp", "--dump-json", "--playlist-items", "1", url],
+        capture_output=True,
+        text=True
     )
 
-    res = youtube.search().list(
-        part="snippet",
-        channelId=CHANNEL_ID,
-        maxResults=5,
-        order="date",
-        type="video"
-    ).execute()
+    if result.returncode != 0:
+        raise Exception("Failed to fetch video")
 
-    return res["items"]
+    data = json.loads(result.stdout.splitlines()[0])
 
-
-def pick_new_video(videos, uploaded):
-    for item in videos:
-        vid = item["id"]["videoId"]
-        title = item["snippet"]["title"]
-
-        if vid not in uploaded:
-            return vid, title
-
-    return None, None
-
+    return data["id"], data["title"]
 
 # ========================
 # DOWNLOAD
 # ========================
-def download_video(video_id):
-    url = f"https://www.youtube.com/watch?v={video_id}"
-
-    print("Downloading:", url)
-
-    result = subprocess.run([
+def download(video_id):
+    subprocess.run([
         "yt-dlp",
         "-f", "mp4",
         "-o", "video.mp4",
-        url
-    ])
-
-    if result.returncode != 0:
-        raise Exception("Download failed")
-
+        f"https://www.youtube.com/watch?v={video_id}"
+    ], check=True)
 
 # ========================
 # UPLOAD
 # ========================
-def upload_video(title):
+def upload(title):
     creds = get_credentials()
 
     youtube = build("youtube", "v3", credentials=creds)
 
-    request = youtube.videos().insert(
+    req = youtube.videos().insert(
         part="snippet,status",
         body={
             "snippet": {
-                "title": f"{title} (Fan Upload)",
-                "description": "Credits to original creator. Fan reupload with permission.",
+                "title": title + " (Fan Upload)",
+                "description": "Credits to original creator",
                 "categoryId": "22"
             },
-            "status": {
-                "privacyStatus": "public"
-            }
+            "status": {"privacyStatus": "public"}
         },
         media_body=MediaFileUpload("video.mp4", resumable=True)
     )
 
-    response = request.execute()
-
-    print("Uploaded:", response["id"])
+    res = req.execute()
+    print("Uploaded:", res["id"])
     return True
-
 
 # ========================
 # MAIN
 # ========================
 def main():
-    print("Starting pipeline...")
+    print("Starting...")
 
-    uploaded = get_uploaded_videos()
-    videos = get_latest_videos()
+    uploaded = get_uploaded()
 
-    video_id, title = pick_new_video(videos, uploaded)
+    vid, title = get_latest_video()
 
-    if not video_id:
-        print("No new video found.")
+    if vid in uploaded:
+        print("Already uploaded")
         return
 
-    print("Selected:", video_id)
+    print("Processing:", vid)
 
-    download_video(video_id)
+    download(vid)
 
-    if upload_video(title):
-        save_uploaded(video_id)
-        print("Done ✅")
+    if upload(title):
+        save_uploaded(vid)
 
     if os.path.exists("video.mp4"):
         os.remove("video.mp4")
-
 
 if __name__ == "__main__":
     main()
