@@ -28,7 +28,12 @@ jobs:
         with:
           python-version: "3.11"
 
-      - name: 📦 Install dependencies
+      - name: 📦 Install Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "18"
+
+      - name: 📦 Install Python dependencies
         run: |
           pip install --upgrade pip
           pip install \
@@ -38,20 +43,22 @@ jobs:
             google-auth-httplib2 \
             google-api-python-client
 
-      - name: 🍪 Write YouTube cookies
-        if: ${{ github.event.inputs.dry_run != 'true' }}
+      - name: 🍪 Write YouTube cookies (if provided)
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          printf '%s' "$YOUTUBE_COOKIES" > $GITHUB_WORKSPACE/cookies.txt
-          echo "Cookie file size: $(wc -c < $GITHUB_WORKSPACE/cookies.txt) bytes"
-          echo "Cookie file lines: $(wc -l < $GITHUB_WORKSPACE/cookies.txt)"
-          echo "Cookie path: $GITHUB_WORKSPACE/cookies.txt"
+          if [ -n "$YOUTUBE_COOKIES" ]; then
+            printf '%s' "$YOUTUBE_COOKIES" > $GITHUB_WORKSPACE/cookies.txt
+            echo "Cookies written."
+          else
+            echo "No cookies secret found – proceeding without cookies."
+          fi
 
       - name: 🔍 Dry run check
         if: ${{ github.event.inputs.dry_run == 'true' }}
         env:
           SOURCE_CHANNEL_ID: ${{ secrets.SOURCE_CHANNEL_ID }}
+          COOKIES_FILE: ${{ github.workspace }}/cookies.txt
         run: |
           python - <<'EOF'
           import json, os, sys
