@@ -45,36 +45,41 @@ def save_progress(data: dict):
 
 
 def get_youtube_client():
-    """Authenticate and return a YouTube API client."""
-    creds = None
+    """
+    Authenticate using individual credential pieces from GitHub Secrets:
+      YOUTUBE_ACCESS_TOKEN   — current access token
+      YOUTUBE_REFRESH_TOKEN  — refresh token (used to auto-renew)
+      YOUTUBE_CLIENT_ID      — OAuth2 client ID
+      YOUTUBE_CLIENT_SECRET  — OAuth2 client secret
+    """
+    access_token   = os.environ.get("YOUTUBE_ACCESS_TOKEN", "")
+    refresh_token  = os.environ.get("YOUTUBE_REFRESH_TOKEN", "")
+    client_id      = os.environ.get("YOUTUBE_CLIENT_ID", "")
+    client_secret  = os.environ.get("YOUTUBE_CLIENT_SECRET", "")
 
-    # Load token from env var (CI) or local file
-    token_json = os.environ.get("YOUTUBE_TOKEN_JSON")
-    if token_json:
-        creds = Credentials.from_authorized_user_info(json.loads(token_json), SCOPES)
-    elif TOKEN_FILE.exists():
-        creds = Credentials.from_authorized_user_info(
-            json.loads(TOKEN_FILE.read_text()), SCOPES
+    if not refresh_token or not client_id or not client_secret:
+        raise EnvironmentError(
+            "Missing one or more required secrets:\n"
+            "  YOUTUBE_REFRESH_TOKEN\n"
+            "  YOUTUBE_CLIENT_ID\n"
+            "  YOUTUBE_CLIENT_SECRET"
         )
 
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            # Only works locally (opens browser)
-            client_secret = os.environ.get("YOUTUBE_CLIENT_SECRET_JSON")
-            if client_secret:
-                import tempfile
-                tmp = tempfile.NamedTemporaryFile(delete=False, suffix=".json", mode="w")
-                tmp.write(client_secret)
-                tmp.close()
-                flow = InstalledAppFlow.from_client_secrets_file(tmp.name, SCOPES)
-            else:
-                flow = InstalledAppFlow.from_client_secrets_file(str(CREDENTIALS_FILE), SCOPES)
-            creds = flow.run_local_server(port=0)
+    # Build credentials from the raw values
+    creds = Credentials(
+        token         = access_token or None,
+        refresh_token = refresh_token,
+        token_uri     = "https://oauth2.googleapis.com/token",
+        client_id     = client_id,
+        client_secret = client_secret,
+        scopes        = SCOPES,
+    )
 
-        # Persist updated token
-        TOKEN_FILE.write_text(creds.to_json())
+    # Auto-refresh if expired (happens every hour — refresh_token keeps it alive forever)
+    if not creds.valid:
+        print("  🔄 Access token expired — refreshing automatically…")
+        creds.refresh(Request())
+        print("  ✅ Token refreshed.")
 
     return build("youtube", "v3", credentials=creds)
 
