@@ -7,7 +7,7 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 # ========================
-# ENV (YOUR NAMES ONLY)
+# ENV (YOUR SECRET NAMES)
 # ========================
 CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID")
 
@@ -76,23 +76,32 @@ def save_uploaded(vid):
         f.write(vid + "\n")
 
 # ========================
-# FETCH LATEST VIDEO (NO API KEY)
+# FETCH LATEST VIDEO (FIXED)
 # ========================
 def get_latest_video():
-    url = f"https://www.youtube.com/channel/{CHANNEL_ID}/videos"
+    # Convert channel ID → uploads playlist
+    playlist_id = "UU" + CHANNEL_ID[2:]
+
+    url = f"https://www.youtube.com/playlist?list={playlist_id}"
 
     result = subprocess.run(
-        ["yt-dlp", "--dump-json", "--playlist-items", "1", url],
+        ["yt-dlp", "--flat-playlist", "-J", url],
         capture_output=True,
         text=True
     )
 
     if result.returncode != 0:
-        raise Exception("Failed to fetch video")
+        print(result.stderr)
+        raise Exception("yt-dlp failed")
 
-    data = json.loads(result.stdout.splitlines()[0])
+    data = json.loads(result.stdout)
 
-    return data["id"], data["title"]
+    if not data.get("entries"):
+        raise Exception("No videos found")
+
+    latest = data["entries"][0]
+
+    return latest["id"], latest["title"]
 
 # ========================
 # DOWNLOAD
