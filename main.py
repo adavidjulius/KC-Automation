@@ -108,14 +108,14 @@ def get_latest_video():
 def download(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    # write cookies
     with open("cookies.txt", "w") as f:
         f.write(COOKIES)
 
     subprocess.run([
         "yt-dlp",
         "--cookies", "cookies.txt",
-        "-f", "bestvideo+bestaudio/best",
+        "--extractor-args", "youtube:player_client=android",
+        "-f", "best",
         "-o", "video.mp4",
         url
     ], check=True)
