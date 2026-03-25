@@ -1,25 +1,30 @@
-name: Daily Upload
+name: Daily YouTube Upload
 
 on:
   schedule:
-    - cron: "0 10 * * *"
+    - cron: "0 10 * * *"  # daily
 
 jobs:
   run:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout
+        uses: actions/checkout@v3
 
-      - name: Install Python
+      - name: Setup Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
-      - name: Install deps
+      - name: Install dependencies
         run: pip install -r requirements.txt
 
       - name: Run script
         env:
           YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+          SOURCE_CHANNEL_ID: ${{ secrets.SOURCE_CHANNEL_ID }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
         run: python main.py
