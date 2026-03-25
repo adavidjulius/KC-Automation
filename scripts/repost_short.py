@@ -11,6 +11,7 @@ repost_short.py
 import json
 import os
 import sys
+import time
 from pathlib import Path
 from datetime import datetime
 
@@ -83,11 +84,10 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
     Use yt-dlp to list ALL Shorts from the channel, sorted oldest → newest.
     Returns list of dicts with id, title, upload_date.
     """
-    # Build URLs: handle both @handle and UCxxxxxx formats
     if channel_id.startswith("@"):
         urls_to_try = [
             f"https://www.youtube.com/{channel_id}/shorts",
-            f"https://www.youtube.com/channel/{channel_id}/shorts",  # fallback
+            f"https://www.youtube.com/channel/{channel_id}/shorts",
         ]
     else:
         urls_to_try = [
@@ -101,7 +101,7 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
         "playlistend": 9999,
         "ignoreerrors": True,
         "extractor_args": {
-            "youtubetab": ["skip=authcheck"],   # bypass auth check for public playlists
+            "youtubetab": ["skip=authcheck"],
         },
         **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
     }
@@ -134,30 +134,54 @@ def download_short(video: dict) -> dict:
     """Download video + subtitles. Returns paths dict."""
     DOWNLOAD_DIR.mkdir(exist_ok=True)
     video_id = video["id"]
-    out_tmpl  = str(DOWNLOAD_DIR / f"{video_id}.%(ext)s")
+    out_tmpl = str(DOWNLOAD_DIR / f"{video_id}.%(ext)s")
 
-    ydl_opts = {
-        "outtmpl": out_tmpl,
-        # Let yt-dlp choose the best format; it will merge video+audio if needed
-        "format": "best",
-        "merge_output_format": "mp4",
-        "writesubtitles": True,
-        "writeautomaticsub": True,
-        "subtitleslangs": ["en"],
-        "subtitlesformat": "srt",
-        "writethumbnail": False,
-        "writedescription": True,
-        "quiet": False,
-        "extractor_args": {
-            "youtube": {
-                "player_client": ["android"],    # android client often works without PO token
-            }
-        },
-        **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
-    }
+    # Try multiple player clients in order (web first, then fallback to android)
+    clients_to_try = ["web", "android"]
+    last_error = None
 
-    with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-        info = ydl.extract_info(video["url"], download=True)
+    for client in clients_to_try:
+        print(f"  Trying client: {client}...")
+        ydl_opts = {
+            "outtmpl": out_tmpl,
+            "format": "best",                         # let yt-dlp choose best
+            "merge_output_format": "mp4",
+            "writesubtitles": True,
+            "writeautomaticsub": True,
+            "subtitleslangs": ["en"],
+            "subtitlesformat": "srt",
+            "writethumbnail": False,
+            "writedescription": True,
+            "quiet": False,
+            "extractor_args": {
+                "youtube": {
+                    "player_client": [client],
+                    "skip": ["dash", "hls"],          # avoid problematic formats
+                }
+            },
+            "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+            **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
+        }
+
+        # Remove cookiefile for android (it doesn't use it and would cause warning)
+        if client == "android" and "cookiefile" in ydl_opts:
+            del ydl_opts["cookiefile"]
+
+        try:
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(video["url"], download=True)
+            # If we get here, download succeeded
+            break
+        except Exception as e:
+            print(f"    Failed with client {client}: {e}")
+            last_error = e
+            # Clean up any partial downloads
+            for f in DOWNLOAD_DIR.glob(f"{video_id}*"):
+                f.unlink(missing_ok=True)
+            continue
+    else:
+        # All clients failed
+        raise last_error or Exception("All download attempts failed.")
 
     # Find downloaded files
     files = list(DOWNLOAD_DIR.glob(f"{video_id}*"))
@@ -282,9 +306,14 @@ def main():
     print(f"   Date  : {next_video['upload_date']}")
     print(f"   URL   : {next_video['url']}\n")
 
-    # Download
+    # Download with retry
     print("⬇  Downloading video + captions…")
-    meta = download_short(next_video)
+    try:
+        meta = download_short(next_video)
+    except Exception as e:
+        print(f"❌ Download failed: {e}")
+        # Optionally list formats for debugging
+        sys.exit(1)
 
     if not meta["video_path"] or not meta["video_path"].exists():
         print("❌ Download failed — no video file found.")
