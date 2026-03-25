@@ -38,6 +38,16 @@ jobs:
             google-auth-httplib2 \
             google-api-python-client
 
+      - name: 🍪 Write YouTube cookies
+        if: ${{ github.event.inputs.dry_run != 'true' }}
+        env:
+          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+        run: |
+          printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
+          echo "Cookie file size: $(wc -c < cookies.txt) bytes"
+          echo "Cookie file lines: $(wc -l < cookies.txt)"
+          head -3 cookies.txt
+
       - name: 🔍 Dry run check
         if: ${{ github.event.inputs.dry_run == 'true' }}
         env:
