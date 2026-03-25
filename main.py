@@ -2,84 +2,25 @@ import os
 import subprocess
 import json
 import requests
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2.credentials import Credentials
 
-# ========================
-# ENV (YOUR SECRET NAMES)
-# ========================
 CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID")
 
-CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
-CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
-REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN")
-COOKIES = os.getenv("YOUTUBE_COOKIES")
+VPS_URL = "http://YOUR_VPS_IP:5000/process"
+API_KEY = "mysecret123"
 
 UPLOADED_FILE = "uploaded.txt"
 
-# ========================
-# VALIDATION
-# ========================
-required = {
-    "SOURCE_CHANNEL_ID": CHANNEL_ID,
-    "YOUTUBE_CLIENT_ID": CLIENT_ID,
-    "YOUTUBE_CLIENT_SECRET": CLIENT_SECRET,
-    "YOUTUBE_REFRESH_TOKEN": REFRESH_TOKEN,
-    "YOUTUBE_COOKIES": COOKIES,
-}
-
-for k, v in required.items():
-    if not v:
-        raise Exception(f"Missing ENV: {k}")
-
-print("ENV OK ✅")
-
-# ========================
-# TOKEN
-# ========================
-def get_access_token():
-    res = requests.post(
-        "https://oauth2.googleapis.com/token",
-        data={
-            "client_id": CLIENT_ID,
-            "client_secret": CLIENT_SECRET,
-            "refresh_token": REFRESH_TOKEN,
-            "grant_type": "refresh_token",
-        }
-    ).json()
-
-    if "access_token" not in res:
-        raise Exception(f"Token error: {res}")
-
-    return res["access_token"]
-
-
-def get_credentials():
-    return Credentials(
-        token=get_access_token(),
-        refresh_token=REFRESH_TOKEN,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET
-    )
-
-# ========================
-# TRACK UPLOADED
-# ========================
+# ================= TRACK =================
 def get_uploaded():
     if not os.path.exists(UPLOADED_FILE):
         return set()
     return set(open(UPLOADED_FILE).read().splitlines())
 
-
 def save_uploaded(vid):
     with open(UPLOADED_FILE, "a") as f:
         f.write(vid + "\n")
 
-# ========================
-# FETCH LATEST VIDEO
-# ========================
+# ================= FETCH =================
 def get_latest_video():
     playlist_id = "UU" + CHANNEL_ID[2:]
     url = f"https://www.youtube.com/playlist?list={playlist_id}"
@@ -90,59 +31,23 @@ def get_latest_video():
         text=True
     )
 
-    if result.returncode != 0:
-        print(result.stderr)
-        raise Exception("yt-dlp failed to fetch videos")
-
     data = json.loads(result.stdout)
-
-    if not data.get("entries"):
-        raise Exception("No videos found")
-
     latest = data["entries"][0]
+
     return latest["id"], latest["title"]
 
-# ========================
-# DOWNLOAD (WITH COOKIES)
-# ========================
-def download(video_id):
-    subprocess.run([
-        "yt-dlp",
-        "--extractor-args", "youtube:player_client=android",
-        "-o", "video.mp4",
-        f"https://www.youtube.com/watch?v={video_id}"
-    ], check=True)
-# ========================
-# UPLOAD
-# ========================
-def upload(title):
-    creds = get_credentials()
-
-    youtube = build("youtube", "v3", credentials=creds)
-
-    req = youtube.videos().insert(
-        part="snippet,status",
-        body={
-            "snippet": {
-                "title": title + " (Fan Upload)",
-                "description": "Credits to original creator",
-                "categoryId": "22"
-            },
-            "status": {"privacyStatus": "public"}
-        },
-        media_body=MediaFileUpload("video.mp4", resumable=True)
+# ================= SEND =================
+def send_to_vps(video_id, title):
+    res = requests.post(
+        VPS_URL,
+        json={"video_id": video_id, "title": title},
+        headers={"x-api-key": API_KEY}
     )
 
-    res = req.execute()
-    print("Uploaded:", res["id"])
-    return True
+    print(res.json())
 
-# ========================
-# MAIN
-# ========================
+# ================= MAIN =================
 def main():
-    print("Starting...")
-
     uploaded = get_uploaded()
 
     vid, title = get_latest_video()
@@ -151,19 +56,10 @@ def main():
         print("Already uploaded")
         return
 
-    print("Processing:", vid)
+    print("Sending to VPS:", vid)
 
-    download(vid)
-
-    if upload(title):
-        save_uploaded(vid)
-
-    # cleanup
-    if os.path.exists("video.mp4"):
-        os.remove("video.mp4")
-    if os.path.exists("cookies.txt"):
-        os.remove("cookies.txt")
-
+    send_to_vps(vid, title)
+    save_uploaded(vid)
 
 if __name__ == "__main__":
     main()
