@@ -6,7 +6,7 @@ from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 # ========================
-# ENV VARIABLES
+# ENV VARIABLES (STRICT)
 # ========================
 API_KEY = os.getenv("YOUTUBE_API_KEY")
 CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID")
@@ -17,6 +17,22 @@ REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN")
 
 UPLOADED_FILE = "uploaded.txt"
 
+# ========================
+# HARD FAIL (NO SILENT BUGS)
+# ========================
+required = {
+    "YOUTUBE_API_KEY": API_KEY,
+    "SOURCE_CHANNEL_ID": CHANNEL_ID,
+    "YOUTUBE_CLIENT_ID": CLIENT_ID,
+    "YOUTUBE_CLIENT_SECRET": CLIENT_SECRET,
+    "YOUTUBE_REFRESH_TOKEN": REFRESH_TOKEN,
+}
+
+for key, value in required.items():
+    if not value:
+        raise Exception(f"Missing ENV: {key}")
+
+print("All ENV variables loaded ✅")
 
 # ========================
 # TOKEN HANDLING
@@ -68,15 +84,20 @@ def save_uploaded(video_id):
 
 
 # ========================
-# FETCH VIDEOS
+# FETCH VIDEOS (API KEY ONLY)
 # ========================
 def get_latest_videos():
-    youtube = build("youtube", "v3", developerKey=API_KEY)
+    youtube = build(
+        "youtube",
+        "v3",
+        developerKey=API_KEY,
+        cache_discovery=False
+    )
 
     res = youtube.search().list(
         part="snippet",
         channelId=CHANNEL_ID,
-        maxResults=10,
+        maxResults=5,
         order="date",
         type="video"
     ).execute()
@@ -96,29 +117,30 @@ def pick_new_video(videos, uploaded):
 
 
 # ========================
-# DOWNLOAD VIDEO
+# DOWNLOAD
 # ========================
 def download_video(video_id):
     url = f"https://www.youtube.com/watch?v={video_id}"
 
-    cmd = [
+    print("Downloading:", url)
+
+    result = subprocess.run([
         "yt-dlp",
         "-f", "mp4",
         "-o", "video.mp4",
         url
-    ]
-
-    result = subprocess.run(cmd)
+    ])
 
     if result.returncode != 0:
         raise Exception("Download failed")
 
 
 # ========================
-# UPLOAD VIDEO
+# UPLOAD
 # ========================
 def upload_video(title):
     creds = get_credentials()
+
     youtube = build("youtube", "v3", credentials=creds)
 
     request = youtube.videos().insert(
@@ -126,7 +148,7 @@ def upload_video(title):
         body={
             "snippet": {
                 "title": f"{title} (Fan Upload)",
-                "description": "Credits to original creator. This is a fan-based promotion.",
+                "description": "Credits to original creator. Fan reupload with permission.",
                 "categoryId": "22"
             },
             "status": {
@@ -138,12 +160,12 @@ def upload_video(title):
 
     response = request.execute()
 
-    print("Uploaded Video ID:", response["id"])
+    print("Uploaded:", response["id"])
     return True
 
 
 # ========================
-# MAIN FLOW
+# MAIN
 # ========================
 def main():
     print("Starting pipeline...")
@@ -157,17 +179,14 @@ def main():
         print("No new video found.")
         return
 
-    print(f"Selected video: {video_id}")
+    print("Selected:", video_id)
 
     download_video(video_id)
 
-    success = upload_video(title)
-
-    if success:
+    if upload_video(title):
         save_uploaded(video_id)
-        print("Done and saved.")
+        print("Done ✅")
 
-    # cleanup
     if os.path.exists("video.mp4"):
         os.remove("video.mp4")
 
