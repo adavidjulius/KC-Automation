@@ -14,6 +14,7 @@ CHANNEL_ID = os.getenv("SOURCE_CHANNEL_ID")
 CLIENT_ID = os.getenv("YOUTUBE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("YOUTUBE_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("YOUTUBE_REFRESH_TOKEN")
+COOKIES = os.getenv("YOUTUBE_COOKIES")
 
 UPLOADED_FILE = "uploaded.txt"
 
@@ -25,6 +26,7 @@ required = {
     "YOUTUBE_CLIENT_ID": CLIENT_ID,
     "YOUTUBE_CLIENT_SECRET": CLIENT_SECRET,
     "YOUTUBE_REFRESH_TOKEN": REFRESH_TOKEN,
+    "YOUTUBE_COOKIES": COOKIES,
 }
 
 for k, v in required.items():
@@ -76,12 +78,10 @@ def save_uploaded(vid):
         f.write(vid + "\n")
 
 # ========================
-# FETCH LATEST VIDEO (FIXED)
+# FETCH LATEST VIDEO
 # ========================
 def get_latest_video():
-    # Convert channel ID → uploads playlist
     playlist_id = "UU" + CHANNEL_ID[2:]
-
     url = f"https://www.youtube.com/playlist?list={playlist_id}"
 
     result = subprocess.run(
@@ -92,7 +92,7 @@ def get_latest_video():
 
     if result.returncode != 0:
         print(result.stderr)
-        raise Exception("yt-dlp failed")
+        raise Exception("yt-dlp failed to fetch videos")
 
     data = json.loads(result.stdout)
 
@@ -100,18 +100,24 @@ def get_latest_video():
         raise Exception("No videos found")
 
     latest = data["entries"][0]
-
     return latest["id"], latest["title"]
 
 # ========================
-# DOWNLOAD
+# DOWNLOAD (WITH COOKIES)
 # ========================
 def download(video_id):
+    url = f"https://www.youtube.com/watch?v={video_id}"
+
+    # write cookies
+    with open("cookies.txt", "w") as f:
+        f.write(COOKIES)
+
     subprocess.run([
         "yt-dlp",
-        "-f", "mp4",
+        "--cookies", "cookies.txt",
+        "-f", "bestvideo+bestaudio/best",
         "-o", "video.mp4",
-        f"https://www.youtube.com/watch?v={video_id}"
+        url
     ], check=True)
 
 # ========================
@@ -160,8 +166,12 @@ def main():
     if upload(title):
         save_uploaded(vid)
 
+    # cleanup
     if os.path.exists("video.mp4"):
         os.remove("video.mp4")
+    if os.path.exists("cookies.txt"):
+        os.remove("cookies.txt")
+
 
 if __name__ == "__main__":
     main()
