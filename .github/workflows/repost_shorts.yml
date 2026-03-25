@@ -1,100 +1,25 @@
-name: 📹 Daily YouTube Shorts Reposter
+name: Daily Upload
 
 on:
   schedule:
     - cron: "0 10 * * *"
-  workflow_dispatch:
-    inputs:
-      dry_run:
-        description: "Dry run — list next Short but don't upload"
-        required: false
-        default: "false"
 
 jobs:
-  repost:
-    name: Download & Repost Next Short
+  run:
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
 
     steps:
-      - name: ⬇ Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v3
+
+      - name: Install Python
+        uses: actions/setup-python@v4
         with:
-          fetch-depth: 1
+          python-version: "3.10"
 
-      - name: 🐍 Set up Python 3.11
-        uses: actions/setup-python@v5
-        with:
-          python-version: "3.11"
+      - name: Install deps
+        run: pip install -r requirements.txt
 
-      - name: 📦 Install Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: "18"
-
-      - name: 📦 Install Python dependencies
-        run: |
-          pip install --upgrade pip
-          pip install \
-            yt-dlp[default] \
-            google-auth \
-            google-auth-oauthlib \
-            google-auth-httplib2 \
-            google-api-python-client
-
-      - name: 🍪 Write YouTube cookies
+      - name: Run script
         env:
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
-        run: |
-          if [ -n "$YOUTUBE_COOKIES" ]; then
-            printf '%s' "$YOUTUBE_COOKIES" > $GITHUB_WORKSPACE/cookies.txt
-            echo "✅ Cookies written ($(wc -l < $GITHUB_WORKSPACE/cookies.txt) lines)."
-          else
-            echo "⚠️ No YOUTUBE_COOKIES secret found – skipping."
-          fi
-
-      - name: 🔍 Dry run check
-        if: ${{ github.event.inputs.dry_run == 'true' }}
-        env:
-          SOURCE_CHANNEL_ID: ${{ secrets.SOURCE_CHANNEL_ID }}
-          COOKIES_FILE: ${{ github.workspace }}/cookies.txt
-        run: |
-          python - <<'EOF'
-          import json, os, sys
-          sys.path.insert(0, "scripts")
-          from repost_short import fetch_all_shorts, load_progress
-          progress = load_progress()
-          posted   = set(progress["posted_ids"])
-          shorts   = fetch_all_shorts(os.environ["SOURCE_CHANNEL_ID"])
-          remaining = [s for s in shorts if s["id"] not in posted]
-          print(f"Total Shorts : {len(shorts)}")
-          print(f"Posted so far: {len(posted)}")
-          print(f"Remaining    : {len(remaining)}")
-          if remaining:
-              n = remaining[0]
-              print(f"\nNext to post :")
-              print(f"  Title : {n['title']}")
-              print(f"  Date  : {n['upload_date']}")
-              print(f"  URL   : {n['url']}")
-          EOF
-
-      - name: 🚀 Repost next Short
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        env:
-          SOURCE_CHANNEL_ID:     ${{ secrets.SOURCE_CHANNEL_ID }}
-          YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          COOKIES_FILE:          ${{ github.workspace }}/cookies.txt
-        run: python scripts/repost_short.py
-
-      - name: 💾 Commit progress
-        if: ${{ github.event.inputs.dry_run != 'true' }}
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add progress.json
-          git diff --cached --quiet || git commit -m "chore: update repost progress [skip ci]"
-          git push
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python main.py
