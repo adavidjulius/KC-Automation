@@ -43,10 +43,10 @@ jobs:
         env:
           YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
         run: |
-          printf '%s' "$YOUTUBE_COOKIES" > cookies.txt
-          echo "Cookie file size: $(wc -c < cookies.txt) bytes"
-          echo "Cookie file lines: $(wc -l < cookies.txt)"
-          head -3 cookies.txt
+          printf '%s' "$YOUTUBE_COOKIES" > $GITHUB_WORKSPACE/cookies.txt
+          echo "Cookie file size: $(wc -c < $GITHUB_WORKSPACE/cookies.txt) bytes"
+          echo "Cookie file lines: $(wc -l < $GITHUB_WORKSPACE/cookies.txt)"
+          echo "Cookie path: $GITHUB_WORKSPACE/cookies.txt"
 
       - name: 🔍 Dry run check
         if: ${{ github.event.inputs.dry_run == 'true' }}
@@ -80,6 +80,7 @@ jobs:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          COOKIES_FILE:          ${{ github.workspace }}/cookies.txt
         run: python scripts/repost_short.py
 
       - name: 💾 Commit progress
