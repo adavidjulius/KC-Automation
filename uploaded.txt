@@ -1,0 +1,22 @@
+from googleapiclient.http import MediaFileUpload
+
+def upload_video(title):
+    youtube = build("youtube", "v3", credentials=YOUR_CREDS)
+
+    request = youtube.videos().insert(
+        part="snippet,status",
+        body={
+            "snippet": {
+                "title": title,
+                "description": "Credits to original creator"
+            },
+            "status": {
+                "privacyStatus": "public"
+            }
+        },
+        media_body=MediaFileUpload("video.mp4")
+    )
+
+    response = request.execute()
+    print(response)
+    return True
