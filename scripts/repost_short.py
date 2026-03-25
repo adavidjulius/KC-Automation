@@ -115,7 +115,6 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
                     for e in info["entries"]:
                         if not e or not e.get("id"):
                             continue
-                        # Use upload_date if available, otherwise default to 19000101
                         upload_date = e.get("upload_date", "19000101")
                         entries.append({
                             "id": e["id"],
@@ -127,7 +126,6 @@ def fetch_all_shorts(channel_id: str) -> list[dict]:
             except Exception as ex:
                 print(f"  Warning: {url} → {ex}")
 
-    # Sort by upload_date (oldest first)
     entries.sort(key=lambda x: x["upload_date"])
     return entries
 
@@ -140,8 +138,8 @@ def download_short(video: dict) -> dict:
 
     ydl_opts = {
         "outtmpl": out_tmpl,
-        # Format: best MP4 video + M4A audio, or fallback to best MP4
-        "format": "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best",
+        # Let yt-dlp choose the best format; it will merge video+audio if needed
+        "format": "best",
         "merge_output_format": "mp4",
         "writesubtitles": True,
         "writeautomaticsub": True,
@@ -152,8 +150,7 @@ def download_short(video: dict) -> dict:
         "quiet": False,
         "extractor_args": {
             "youtube": {
-                "skip": ["dash", "hls"],               # avoid problematic streams
-                "player_client": ["web"],              # web client works with cookies
+                "player_client": ["android"],    # android client often works without PO token
             }
         },
         **({"cookiefile": str(COOKIES_FILE)} if COOKIES_FILE.exists() else {}),
