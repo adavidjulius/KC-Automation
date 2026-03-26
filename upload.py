@@ -1,43 +1,110 @@
-import os, json, google.auth.transport.requests
-from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
-from google.oauth2.credentials import Credentials
+name: 🎬 YouTube Auto Repost
 
-creds = Credentials(
-    token=os.environ['YOUTUBE_ACCESS_TOKEN'],
-    refresh_token=os.environ['YOUTUBE_REFRESH_TOKEN'],
-    token_uri="https://oauth2.googleapis.com/token",
-    client_id=os.environ['YOUTUBE_CLIENT_ID'],
-    client_secret=os.environ['YOUTUBE_CLIENT_SECRET']
-)
+on:
+  workflow_dispatch:
+    inputs:
+      video_url:
+        description: 'YouTube URL to download and repost'
+        required: true
+      title:
+        description: 'Video title for your channel'
+        required: true
+      description:
+        description: 'Video description'
+        required: false
+        default: 'Auto reposted via GitHub Actions'
+      privacy:
+        description: 'Privacy (public/unlisted/private)'
+        required: false
+        default: 'public'
 
-# Auto refresh if token expired
-request = google.auth.transport.requests.Request()
-if creds.expired:
-    creds.refresh(request)
+  issues:
+    types: [opened]
 
-youtube = build('youtube', 'v3', credentials=creds)
+jobs:
+  repost:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
 
-body = {
-    "snippet": {
-        "title": os.environ.get("VIDEO_TITLE", "Auto Reposted Video"),
-        "description": os.environ.get("VIDEO_DESC", "Auto reposted via GitHub Actions 🤖"),
-        "tags": ["repost", "auto"],
-        "categoryId": "22"
-    },
-    "status": {
-        "privacyStatus": os.environ.get("PRIVACY", "public")
-    }
-}
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-media = MediaFileUpload("video.mp4", mimetype="video/mp4", chunksize=-1, resumable=True)
-req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+      - name: Parse URL from Issue
+        if: github.event_name == 'issues'
+        id: issue_parse
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          BODY="${{ github.event.issue.body }}"
+          if [[ "$TITLE" == \[REPOST\]* ]]; then
+            URL=$(echo "$BODY" | grep -oP 'https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w-]+')
+            VID_TITLE="${TITLE#\[REPOST\] }"
+            echo "url=$URL" >> $GITHUB_OUTPUT
+            echo "title=$VID_TITLE" >> $GITHUB_OUTPUT
+          else
+            echo "Not a repost issue, skipping."
+            exit 0
+          fi
 
-response = None
-while response is None:
-    status, response = req.next_chunk()
-    if status:
-        print(f"Upload progress: {int(status.progress() * 100)}%")
+      - name: Set variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" == "issues" ]; then
+            echo "url=${{ steps.issue_parse.outputs.url }}" >> $GITHUB_OUTPUT
+            echo "title=${{ steps.issue_parse.outputs.title }}" >> $GITHUB_OUTPUT
+          else
+            echo "url=${{ github.event.inputs.video_url }}" >> $GITHUB_OUTPUT
+            echo "title=${{ github.event.inputs.title }}" >> $GITHUB_OUTPUT
+          fi
 
-print(f"✅ Upload complete! Video ID: {response['id']}")
-print(f"🔗 https://youtube.com/watch?v={response['id']}")
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start bgutil PO Token server
+        run: |
+          python -m bgutil_ytdlp_pot_provider.server &
+          echo "⏳ Waiting for PO token server to start..."
+          sleep 5
+          echo "✅ PO token server running on port 4416"
+
+      - name: Download YouTube video (no cookies needed)
+        run: |
+          yt-dlp \
+            --extractor-args "youtube:player-client=mweb,default;getpot_bgutil_baseurl=http://localhost:4416" \
+            -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
+            --merge-output-format mp4 \
+            --no-playlist \
+            --progress \
+            -o "video.mp4" \
+            "${{ steps.vars.outputs.url }}"
+
+      - name: Verify download
+        run: |
+          ls -lh video.mp4
+          echo "✅ Download successful!"
+
+      - name: Upload to YouTube channel
+        run: python upload.py
+        env:
+          YOUTUBE_ACCESS_TOKEN: ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          VIDEO_TITLE: ${{ steps.vars.outputs.title }}
+          VIDEO_DESC: ${{ github.event.inputs.description || 'Auto reposted via GitHub Actions' }}
+          PRIVACY: ${{ github.event.inputs.privacy || 'public' }}
+
+      - name: Comment on Issue with result
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Video has been successfully reposted to the channel! 🎬'
+            })
