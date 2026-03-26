@@ -2,8 +2,8 @@ name: 🎬 YouTube Shorts Auto Repost
 
 on:
   schedule:
-    - cron: '0 */6 * * *'   # every 6 hours
-  workflow_dispatch:          # manual trigger anytime
+    - cron: '0 */6 * * *'
+  workflow_dispatch:
 
 jobs:
   repost:
@@ -40,59 +40,115 @@ jobs:
       - name: 🏁 Stop if all Shorts posted
         if: env.NO_SHORTS == 'true'
         run: |
-          echo "✅ Nothing new to repost. Exiting cleanly."
+          echo "✅ All Shorts already reposted. Nothing to do."
           exit 0
 
-      # ── 6. Start PO token server ───────────────────────────────────
+      # ── 6. Verify URL exists ───────────────────────────────────────
+      - name: 🔎 Verify NEXT_URL is set
+        if: env.NO_SHORTS != 'true'
+        run: |
+          echo "NEXT_URL  = ${{ env.NEXT_URL }}"
+          echo "NEXT_ID   = ${{ env.NEXT_ID }}"
+          echo "NEXT_TITLE= ${{ env.NEXT_TITLE }}"
+          if [ -z "${{ env.NEXT_URL }}" ]; then
+            echo "❌ NEXT_URL is empty! Aborting."
+            exit 1
+          fi
+          echo "✅ URL verified."
+
+      # ── 7. Update yt-dlp to latest ─────────────────────────────────
+      - name: ⬆️ Update yt-dlp to latest version
+        if: env.NO_SHORTS != 'true'
+        run: |
+          sudo curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
+            -o /usr/local/bin/yt-dlp
+          sudo chmod +x /usr/local/bin/yt-dlp
+          yt-dlp --version
+
+      # ── 8. Start PO token server ───────────────────────────────────
       - name: 🔑 Start bgutil PO Token server
         if: env.NO_SHORTS != 'true'
         run: |
-          python -m bgutil_ytdlp_pot_provider.server &
-          sleep 5
-          echo "✅ PO token server ready on port 4416"
+          python -m bgutil_ytdlp_pot_provider.server > /tmp/bgutil.log 2>&1 &
+          echo "⏳ Waiting 10s for server..."
+          sleep 10
+          echo "✅ PO token server started"
+          cat /tmp/bgutil.log || true
 
-      # ── 7. Download Short ──────────────────────────────────────────
-      - name: ⬇️ Download Short via yt-dlp
+      # ── 9. Download Short ──────────────────────────────────────────
+      - name: ⬇️ Download Short
         if: env.NO_SHORTS != 'true'
         run: |
-          echo "📥 Downloading: ${{ env.NEXT_URL }}"
+          set -e
+          URL="${{ env.NEXT_URL }}"
+          echo "📥 Downloading: $URL"
 
+          # Attempt 1 — with bgutil PO token
+          echo "🔄 Attempt 1: bgutil + mweb client..."
           yt-dlp \
             --extractor-args "youtube:player-client=mweb,default;getpot_bgutil_baseurl=http://localhost:4416" \
             -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
             --merge-output-format mp4 \
             --no-playlist \
             --no-part \
-            --progress \
-            --print after_move:filepath \
+            --retries 5 \
+            --fragment-retries 5 \
             -o "video.mp4" \
-            "${{ env.NEXT_URL }}"
+            "$URL" && echo "✅ Attempt 1 succeeded" || {
 
-          # Rename if yt-dlp added extra extension
+          # Attempt 2 — mweb only, no bgutil
+          echo "🔄 Attempt 2: mweb client only..."
+          yt-dlp \
+            --extractor-args "youtube:player-client=mweb" \
+            -f "best[ext=mp4]/best" \
+            --merge-output-format mp4 \
+            --no-playlist \
+            --no-part \
+            --retries 5 \
+            -o "video.mp4" \
+            "$URL" && echo "✅ Attempt 2 succeeded" || {
+
+          # Attempt 3 — ios client (bypasses most checks)
+          echo "🔄 Attempt 3: ios client..."
+          yt-dlp \
+            --extractor-args "youtube:player-client=ios" \
+            -f "best[ext=mp4]/best" \
+            --merge-output-format mp4 \
+            --no-playlist \
+            --no-part \
+            --retries 5 \
+            -o "video.mp4" \
+            "$URL" && echo "✅ Attempt 3 succeeded" || {
+
+          echo "❌ All download attempts failed!"
+          exit 1
+
+          }}}
+
+      # ── 10. Fix filename if needed ─────────────────────────────────
+      - name: 🔧 Fix video filename
+        if: env.NO_SHORTS != 'true'
+        run: |
+          echo "📂 Files in directory:"
+          ls -lah
+
           if [ ! -f "video.mp4" ]; then
-            FOUND=$(ls *.mp4 2>/dev/null | head -1)
+            FOUND=$(ls *.mp4 *.webm *.mkv 2>/dev/null | head -1)
             if [ -n "$FOUND" ]; then
-              echo "⚠️ Renaming $FOUND → video.mp4"
-              mv "$FOUND" video.mp4
+              echo "🔄 Renaming $FOUND → video.mp4"
+              ffmpeg -i "$FOUND" -c copy video.mp4
+              rm -f "$FOUND"
             else
-              echo "❌ Download failed completely!"
+              echo "❌ No video file found after download!"
               exit 1
             fi
           fi
 
-          echo "✅ File ready:"
+          echo "✅ video.mp4 confirmed:"
           ls -lh video.mp4
 
-
-      # ── 8. Verify download ─────────────────────────────────────────
-      - name: ✅ Verify downloaded file
-        if: env.NO_SHORTS != 'true'
-        run: |
-          ls -lh video.mp4
-          echo "Downloaded: ${{ env.NEXT_TITLE }}"
-
-      # ── 9. Upload to channel ───────────────────────────────────────
-      - name: 📤 Upload Short to YouTube channel
+      # ── 11. Upload to channel ──────────────────────────────────────
+      - name: 📤 Upload to YouTube channel
         if: env.NO_SHORTS != 'true'
         run: python upload.py
         env:
@@ -105,12 +161,12 @@ jobs:
           PRIVACY:      "public"
           NEXT_ID:      ${{ env.NEXT_ID }}
 
-      # ── 10. Save posted.json back to repo ──────────────────────────
+      # ── 12. Save posted.json ───────────────────────────────────────
       - name: 💾 Commit posted.json
         if: env.NO_SHORTS != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add posted.json
-          git commit -m "✅ Reposted Short: ${{ env.NEXT_ID }}"
+          git diff --staged --quiet || git commit -m "✅ Reposted: ${{ env.NEXT_ID }}"
           git push
