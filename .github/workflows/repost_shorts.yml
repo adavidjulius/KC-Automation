@@ -14,15 +14,19 @@ jobs:
 
     steps:
 
+      # ── 1. Checkout ────────────────────────────────────────────────
       - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
+      # ── 2. ffmpeg ──────────────────────────────────────────────────
       - name: 🎞️ Install ffmpeg
         uses: AnimMouse/setup-ffmpeg@v1
 
+      # ── 3. Python deps ─────────────────────────────────────────────
       - name: 📦 Install Python dependencies
         run: pip install -r requirements.txt
 
+      # ── 4. Fetch next video from Drive ─────────────────────────────
       - name: 🔍 Fetch next video from Drive
         run: python fetch_from_drive.py
         env:
@@ -32,33 +36,41 @@ jobs:
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           DRIVE_FOLDER_ID:       ${{ secrets.DRIVE_FOLDER_ID }}
 
+      # ── 5. Stop if nothing left ────────────────────────────────────
       - name: 🏁 Stop if no videos left
         if: env.NO_VIDEOS == 'true'
         run: |
           echo "✅ All Drive videos posted. Nothing left!"
           exit 0
 
+      # ── 6. Verify video exists ─────────────────────────────────────
       - name: ✅ Verify video.mp4 exists
         if: env.NO_VIDEOS != 'true'
         run: |
           ls -lh video.mp4
           echo "✅ File ready: ${{ env.NEXT_TITLE }}"
 
-      - name: 🎨 Add logo watermark to video
+      # ── 7. Add logo watermark ──────────────────────────────────────
+      - name: 🎨 Add logo watermark (small, top-right, 80% opacity)
         if: env.NO_VIDEOS != 'true'
         run: |
-          echo "🖼️ Adding logo overlay..."
+          echo "🖼️ Overlaying logo..."
 
           ffmpeg -i video.mp4 -i logo.png \
             -filter_complex \
-            "[1:v]scale=120:-1[logo];[0:v][logo]overlay=W-w-20:20" \
-            -codec:a copy \
+            "[1:v]scale=80:-1,format=rgba,colorchannelmixer=aa=0.8[logo];[0:v][logo]overlay=W-w-15:15" \
+            -c:v libx264 \
+            -preset ultrafast \
+            -crf 23 \
+            -c:a copy \
+            -movflags +faststart \
             -y video_watermarked.mp4
 
           mv video_watermarked.mp4 video.mp4
-          echo "✅ Logo watermark added!"
+          echo "✅ Logo added — small, top-right, 80% opacity"
           ls -lh video.mp4
 
+      # ── 8. Upload to YouTube ───────────────────────────────────────
       - name: 📤 Upload to YouTube channel
         if: env.NO_VIDEOS != 'true'
         run: python upload.py
@@ -72,6 +84,7 @@ jobs:
           PRIVACY:      "public"
           NEXT_ID:      ${{ env.NEXT_ID }}
 
+      # ── 9. Commit posted.json ──────────────────────────────────────
       - name: 💾 Commit posted.json
         if: env.NO_VIDEOS != 'true'
         run: |
