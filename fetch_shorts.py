@@ -1,8 +1,8 @@
 import os
 import json
+import requests
 import google.auth.transport.requests
 from googleapiclient.discovery import build
-from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
 # ── Auth ──────────────────────────────────────────────────────────────
@@ -18,83 +18,82 @@ if creds.expired or not creds.valid:
     creds.refresh(google.auth.transport.requests.Request())
     print("🔄 Token refreshed")
 
-youtube = build('youtube', 'v3', credentials=creds)
-print("✅ YouTube API ready")
+drive = build('drive', 'v3', credentials=creds)
 
-# ── Metadata ──────────────────────────────────────────────────────────
-title    = os.environ.get('VIDEO_TITLE', 'Auto Reposted Short')
-desc     = os.environ.get('VIDEO_DESC', 'Auto reposted via GitHub Actions 🤖 #Shorts')
-privacy  = os.environ.get('PRIVACY', 'public')
-next_id  = os.environ.get('NEXT_ID', '')
+# ── List all videos in your Drive folder ──────────────────────────────
+folder_id = os.environ['DRIVE_FOLDER_ID']
 
-print(f"📝 Title   : {title}")
-print(f"🔒 Privacy : {privacy}")
+print(f"📂 Scanning Drive folder: {folder_id}")
 
-# ── Verify File ───────────────────────────────────────────────────────
-video_file = "video.mp4"
-if not os.path.exists(video_file):
-    print("❌ video.mp4 not found!")
-    exit(1)
+results = drive.files().list(
+    q=f"'{folder_id}' in parents and mimeType contains 'video/' and trashed=false",
+    orderBy="createdTime",       # oldest first
+    fields="files(id, name, createdTime, mimeType)",
+    pageSize=100
+).execute()
 
-size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 2)
-print(f"📦 File size: {size_mb} MB")
+all_videos = results.get('files', [])
+print(f"📦 Total videos in Drive: {len(all_videos)}")
 
-# ── Upload ────────────────────────────────────────────────────────────
-body = {
-    "snippet": {
-        "title": title,
-        "description": desc,
-        "tags": ["shorts", "repost", "auto", "viral"],
-        "categoryId": "22",
-        "defaultLanguage": "en",
-        "defaultAudioLanguage": "en"
-    },
-    "status": {
-        "privacyStatus": privacy,
-        "selfDeclaredMadeForKids": False,
-        "madeForKids": False
-    }
-}
+if not all_videos:
+    print("❌ No videos found in Drive folder!")
+    with open(os.environ['GITHUB_ENV'], 'a') as f:
+        f.write("NO_VIDEOS=true\n")
+    exit(0)
 
-media = MediaFileUpload(
-    video_file,
-    mimetype="video/mp4",
-    chunksize=10 * 1024 * 1024,
-    resumable=True
-)
-
-req = youtube.videos().insert(
-    part="snippet,status",
-    body=body,
-    media_body=media
-)
-
-print("\n⬆️  Uploading...")
-response = None
-while response is None:
-    try:
-        status, response = req.next_chunk()
-        if status:
-            print(f"   Progress: {int(status.progress() * 100)}%")
-    except Exception as e:
-        print(f"⚠️  Retrying chunk: {e}")
-        continue
-
-# ── Result ────────────────────────────────────────────────────────────
-video_id = response['id']
-print(f"\n✅ Upload complete!")
-print(f"🎬 Video ID  : {video_id}")
-print(f"🔗 Shorts URL: https://youtube.com/shorts/{video_id}")
-print(f"🔗 Watch URL : https://youtube.com/watch?v={video_id}")
-
-# ── Save to posted.json ───────────────────────────────────────────────
+# ── Load already posted ───────────────────────────────────────────────
 posted_file = 'posted.json'
 posted = json.load(open(posted_file)) if os.path.exists(posted_file) else []
+print(f"✅ Already posted: {len(posted)} videos")
 
-if next_id and next_id not in posted:
-    posted.append(next_id)
-    with open(posted_file, 'w') as f:
-        json.dump(posted, f, indent=2)
-    print(f"\n📝 Saved {next_id} to posted.json")
+# ── Pick next unposted video ──────────────────────────────────────────
+next_video = None
+for video in all_videos:
+    if video['id'] not in posted:
+        next_video = video
+        break
 
-print("\n🎉 All done!")
+if not next_video:
+    print("🏁 All videos in Drive already posted!")
+    with open(os.environ['GITHUB_ENV'], 'a') as f:
+        f.write("NO_VIDEOS=true\n")
+    exit(0)
+
+print(f"\n🎯 Next video to post:")
+print(f"   Name : {next_video['name']}")
+print(f"   ID   : {next_video['id']}")
+print(f"   Date : {next_video['createdTime']}")
+
+# ── Download video from Drive ─────────────────────────────────────────
+print(f"\n⬇️  Downloading from Drive...")
+
+request = drive.files().get_media(fileId=next_video['id'])
+
+with open('video.mp4', 'wb') as f:
+    downloader = request
+    response = drive.files().get_media(fileId=next_video['id'])
+    
+    # Stream download in chunks
+    import googleapiclient.http
+    downloader = googleapiclient.http.MediaIoBaseDownload(
+        f, drive.files().get_media(fileId=next_video['id'])
+    )
+    
+    done = False
+    while not done:
+        status, done = downloader.next_chunk()
+        if status:
+            print(f"   Download: {int(status.progress() * 100)}%")
+
+print("✅ Downloaded to video.mp4")
+
+# Strip file extension from name for title
+title = os.path.splitext(next_video['name'])[0]
+
+# ── Write to GitHub ENV ───────────────────────────────────────────────
+with open(os.environ['GITHUB_ENV'], 'a') as f:
+    f.write(f"NEXT_ID={next_video['id']}\n")
+    f.write(f"NEXT_TITLE={title}\n")
+    f.write("NO_VIDEOS=false\n")
+
+print(f"\n✅ Ready to upload: {title}")
