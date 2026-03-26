@@ -1,4 +1,4 @@
-name: 🎬 YouTube Shorts Auto Repost
+name: 🎬 YouTube Shorts Auto Repost (From Drive)
 
 on:
   schedule:
@@ -14,142 +14,35 @@ jobs:
 
     steps:
 
-      # ── 1. Checkout ────────────────────────────────────────────────
       - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
-      # ── 2. ffmpeg ──────────────────────────────────────────────────
-      - name: 🎞️ Install ffmpeg
-        uses: AnimMouse/setup-ffmpeg@v1
-
-      # ── 3. Python deps ─────────────────────────────────────────────
       - name: 📦 Install Python dependencies
         run: pip install -r requirements.txt
 
-      # ── 4. Fetch next Short ────────────────────────────────────────
-      - name: 🔍 Fetch next unposted Short
-        run: python fetch_shorts.py
+      - name: 🔍 Fetch next video from Drive
+        run: python fetch_from_drive.py
         env:
           YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          SOURCE_CHANNEL_ID:     ${{ secrets.SOURCE_CHANNEL_ID }}
+          DRIVE_FOLDER_ID:       ${{ secrets.DRIVE_FOLDER_ID }}
 
-      # ── 5. Stop if nothing new ─────────────────────────────────────
-      - name: 🏁 Stop if all Shorts posted
-        if: env.NO_SHORTS == 'true'
+      - name: 🏁 Stop if no videos left
+        if: env.NO_VIDEOS == 'true'
         run: |
-          echo "✅ All Shorts already reposted. Nothing to do."
+          echo "✅ All Drive videos posted. Nothing left!"
           exit 0
 
-      # ── 6. Verify URL exists ───────────────────────────────────────
-      - name: 🔎 Verify NEXT_URL is set
-        if: env.NO_SHORTS != 'true'
+      - name: ✅ Verify video.mp4 exists
+        if: env.NO_VIDEOS != 'true'
         run: |
-          echo "NEXT_URL  = ${{ env.NEXT_URL }}"
-          echo "NEXT_ID   = ${{ env.NEXT_ID }}"
-          echo "NEXT_TITLE= ${{ env.NEXT_TITLE }}"
-          if [ -z "${{ env.NEXT_URL }}" ]; then
-            echo "❌ NEXT_URL is empty! Aborting."
-            exit 1
-          fi
-          echo "✅ URL verified."
-
-      # ── 7. Update yt-dlp to latest ─────────────────────────────────
-      - name: ⬆️ Update yt-dlp to latest version
-        if: env.NO_SHORTS != 'true'
-        run: |
-          sudo curl -sL https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp \
-            -o /usr/local/bin/yt-dlp
-          sudo chmod +x /usr/local/bin/yt-dlp
-          yt-dlp --version
-
-      # ── 8. Start PO token server ───────────────────────────────────
-      - name: 🔑 Start bgutil PO Token server
-        if: env.NO_SHORTS != 'true'
-        run: |
-          python -m bgutil_ytdlp_pot_provider.server > /tmp/bgutil.log 2>&1 &
-          echo "⏳ Waiting 10s for server..."
-          sleep 10
-          echo "✅ PO token server started"
-          cat /tmp/bgutil.log || true
-
-      # ── 9. Download Short ──────────────────────────────────────────
-      - name: ⬇️ Download Short
-        if: env.NO_SHORTS != 'true'
-        run: |
-          set -e
-          URL="${{ env.NEXT_URL }}"
-          echo "📥 Downloading: $URL"
-
-          # Attempt 1 — with bgutil PO token
-          echo "🔄 Attempt 1: bgutil + mweb client..."
-          yt-dlp \
-            --extractor-args "youtube:player-client=mweb,default;getpot_bgutil_baseurl=http://localhost:4416" \
-            -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
-            --merge-output-format mp4 \
-            --no-playlist \
-            --no-part \
-            --retries 5 \
-            --fragment-retries 5 \
-            -o "video.mp4" \
-            "$URL" && echo "✅ Attempt 1 succeeded" || {
-
-          # Attempt 2 — mweb only, no bgutil
-          echo "🔄 Attempt 2: mweb client only..."
-          yt-dlp \
-            --extractor-args "youtube:player-client=mweb" \
-            -f "best[ext=mp4]/best" \
-            --merge-output-format mp4 \
-            --no-playlist \
-            --no-part \
-            --retries 5 \
-            -o "video.mp4" \
-            "$URL" && echo "✅ Attempt 2 succeeded" || {
-
-          # Attempt 3 — ios client (bypasses most checks)
-          echo "🔄 Attempt 3: ios client..."
-          yt-dlp \
-            --extractor-args "youtube:player-client=ios" \
-            -f "best[ext=mp4]/best" \
-            --merge-output-format mp4 \
-            --no-playlist \
-            --no-part \
-            --retries 5 \
-            -o "video.mp4" \
-            "$URL" && echo "✅ Attempt 3 succeeded" || {
-
-          echo "❌ All download attempts failed!"
-          exit 1
-
-          }}}
-
-      # ── 10. Fix filename if needed ─────────────────────────────────
-      - name: 🔧 Fix video filename
-        if: env.NO_SHORTS != 'true'
-        run: |
-          echo "📂 Files in directory:"
-          ls -lah
-
-          if [ ! -f "video.mp4" ]; then
-            FOUND=$(ls *.mp4 *.webm *.mkv 2>/dev/null | head -1)
-            if [ -n "$FOUND" ]; then
-              echo "🔄 Renaming $FOUND → video.mp4"
-              ffmpeg -i "$FOUND" -c copy video.mp4
-              rm -f "$FOUND"
-            else
-              echo "❌ No video file found after download!"
-              exit 1
-            fi
-          fi
-
-          echo "✅ video.mp4 confirmed:"
           ls -lh video.mp4
+          echo "✅ File ready: ${{ env.NEXT_TITLE }}"
 
-      # ── 11. Upload to channel ──────────────────────────────────────
       - name: 📤 Upload to YouTube channel
-        if: env.NO_SHORTS != 'true'
+        if: env.NO_VIDEOS != 'true'
         run: python upload.py
         env:
           YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
@@ -157,16 +50,15 @@ jobs:
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           VIDEO_TITLE:  ${{ env.NEXT_TITLE }}
-          VIDEO_DESC:   "Auto reposted via GitHub Actions 🤖 #Shorts"
+          VIDEO_DESC:   "🤖 Auto posted via GitHub Actions #Shorts"
           PRIVACY:      "public"
           NEXT_ID:      ${{ env.NEXT_ID }}
 
-      # ── 12. Save posted.json ───────────────────────────────────────
       - name: 💾 Commit posted.json
-        if: env.NO_SHORTS != 'true'
+        if: env.NO_VIDEOS != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add posted.json
-          git diff --staged --quiet || git commit -m "✅ Reposted: ${{ env.NEXT_ID }}"
+          git diff --staged --quiet || git commit -m "✅ Posted: ${{ env.NEXT_TITLE }}"
           git push
