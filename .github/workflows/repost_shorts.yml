@@ -17,6 +17,9 @@ jobs:
       - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
+      - name: 🎞️ Install ffmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
+
       - name: 📦 Install Python dependencies
         run: pip install -r requirements.txt
 
@@ -40,6 +43,21 @@ jobs:
         run: |
           ls -lh video.mp4
           echo "✅ File ready: ${{ env.NEXT_TITLE }}"
+
+      - name: 🎨 Add logo watermark to video
+        if: env.NO_VIDEOS != 'true'
+        run: |
+          echo "🖼️ Adding logo overlay..."
+
+          ffmpeg -i video.mp4 -i logo.png \
+            -filter_complex \
+            "[1:v]scale=120:-1[logo];[0:v][logo]overlay=W-w-20:20" \
+            -codec:a copy \
+            -y video_watermarked.mp4
+
+          mv video_watermarked.mp4 video.mp4
+          echo "✅ Logo watermark added!"
+          ls -lh video.mp4
 
       - name: 📤 Upload to YouTube channel
         if: env.NO_VIDEOS != 'true'
