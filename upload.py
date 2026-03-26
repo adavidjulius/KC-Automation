@@ -1,16 +1,20 @@
-import os, json
+import os, json, google.auth.transport.requests
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
 
-token_data = json.loads(os.environ['YOUTUBE_TOKEN'])
 creds = Credentials(
-    token=token_data['token'],
-    refresh_token=token_data['refresh_token'],
+    token=os.environ['YOUTUBE_ACCESS_TOKEN'],
+    refresh_token=os.environ['YOUTUBE_REFRESH_TOKEN'],
     token_uri="https://oauth2.googleapis.com/token",
-    client_id=token_data['client_id'],
-    client_secret=token_data['client_secret']
+    client_id=os.environ['YOUTUBE_CLIENT_ID'],
+    client_secret=os.environ['YOUTUBE_CLIENT_SECRET']
 )
+
+# Auto refresh if token expired
+request = google.auth.transport.requests.Request()
+if creds.expired:
+    creds.refresh(request)
 
 youtube = build('youtube', 'v3', credentials=creds)
 
@@ -27,11 +31,11 @@ body = {
 }
 
 media = MediaFileUpload("video.mp4", mimetype="video/mp4", chunksize=-1, resumable=True)
-request = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
+req = youtube.videos().insert(part="snippet,status", body=body, media_body=media)
 
 response = None
 while response is None:
-    status, response = request.next_chunk()
+    status, response = req.next_chunk()
     if status:
         print(f"Upload progress: {int(status.progress() * 100)}%")
 
