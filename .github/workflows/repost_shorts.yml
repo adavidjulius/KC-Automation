@@ -2,9 +2,8 @@ name: 🎬 YouTube Shorts Auto Repost
 
 on:
   schedule:
-    - cron: '0 */6 * * *'
-
-  workflow_dispatch:
+    - cron: '0 */6 * * *'   # every 6 hours
+  workflow_dispatch:          # manual trigger anytime
 
 jobs:
   repost:
@@ -14,38 +13,47 @@ jobs:
       contents: write
 
     steps:
-      - name: Checkout repo
+
+      # ── 1. Checkout ────────────────────────────────────────────────
+      - name: 📥 Checkout repo
         uses: actions/checkout@v4
 
-      - name: Install ffmpeg
+      # ── 2. ffmpeg ──────────────────────────────────────────────────
+      - name: 🎞️ Install ffmpeg
         uses: AnimMouse/setup-ffmpeg@v1
 
-      - name: Install Python dependencies
+      # ── 3. Python deps ─────────────────────────────────────────────
+      - name: 📦 Install Python dependencies
         run: pip install -r requirements.txt
 
-      - name: Fetch next unposted Short from source channel
+      # ── 4. Fetch next Short ────────────────────────────────────────
+      - name: 🔍 Fetch next unposted Short
         run: python fetch_shorts.py
         env:
-          YOUTUBE_ACCESS_TOKEN: ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
+          YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          SOURCE_CHANNEL_ID: ${{ secrets.SOURCE_CHANNEL_ID }}
+          SOURCE_CHANNEL_ID:     ${{ secrets.SOURCE_CHANNEL_ID }}
 
-      - name: Stop if no new Shorts found
+      # ── 5. Stop if nothing new ─────────────────────────────────────
+      - name: 🏁 Stop if all Shorts posted
         if: env.NO_SHORTS == 'true'
         run: |
-          echo "✅ All Shorts already reposted. Nothing new to do."
+          echo "✅ Nothing new to repost. Exiting cleanly."
           exit 0
 
-      - name: Start bgutil PO Token server
+      # ── 6. Start PO token server ───────────────────────────────────
+      - name: 🔑 Start bgutil PO Token server
+        if: env.NO_SHORTS != 'true'
         run: |
           python -m bgutil_ytdlp_pot_provider.server &
-          echo "⏳ Waiting for PO token server..."
           sleep 5
           echo "✅ PO token server ready on port 4416"
 
-      - name: Download Short
+      # ── 7. Download Short ──────────────────────────────────────────
+      - name: ⬇️ Download Short via yt-dlp
+        if: env.NO_SHORTS != 'true'
         run: |
           yt-dlp \
             --extractor-args "youtube:player-client=mweb,default;getpot_bgutil_baseurl=http://localhost:4416" \
@@ -56,27 +64,33 @@ jobs:
             -o "video.mp4" \
             "${{ env.NEXT_URL }}"
 
-      - name: Verify download
+      # ── 8. Verify download ─────────────────────────────────────────
+      - name: ✅ Verify downloaded file
+        if: env.NO_SHORTS != 'true'
         run: |
           ls -lh video.mp4
-          echo "✅ Downloaded: ${{ env.NEXT_TITLE }}"
+          echo "Downloaded: ${{ env.NEXT_TITLE }}"
 
-      - name: Upload Short to your channel
+      # ── 9. Upload to channel ───────────────────────────────────────
+      - name: 📤 Upload Short to YouTube channel
+        if: env.NO_SHORTS != 'true'
         run: python upload.py
         env:
-          YOUTUBE_ACCESS_TOKEN: ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
+          YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          VIDEO_TITLE: ${{ env.NEXT_TITLE }}
-          VIDEO_DESC: "Auto reposted via GitHub Actions 🤖 #Shorts"
-          PRIVACY: "public"
-          NEXT_ID: ${{ env.NEXT_ID }}
+          VIDEO_TITLE:  ${{ env.NEXT_TITLE }}
+          VIDEO_DESC:   "Auto reposted via GitHub Actions 🤖 #Shorts"
+          PRIVACY:      "public"
+          NEXT_ID:      ${{ env.NEXT_ID }}
 
-      - name: Save posted.json back to repo
+      # ── 10. Save posted.json back to repo ──────────────────────────
+      - name: 💾 Commit posted.json
+        if: env.NO_SHORTS != 'true'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git add posted.json
-          git commit -m "✅ Marked ${{ env.NEXT_ID }} as posted"
+          git commit -m "✅ Reposted Short: ${{ env.NEXT_ID }}"
           git push
