@@ -1,11 +1,9 @@
 name: 🎬 YouTube Shorts Auto Repost
 
 on:
-  # Run every 6 hours automatically
   schedule:
     - cron: '0 */6 * * *'
 
-  # Also allow manual trigger
   workflow_dispatch:
 
 jobs:
@@ -13,14 +11,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 120
     permissions:
-      contents: write  # needed to commit posted.json back to repo
+      contents: write
 
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
 
       - name: Install ffmpeg
-        run: sudo apt-get install -y ffmpeg
+        uses: AnimMouse/setup-ffmpeg@v1
 
       - name: Install Python dependencies
         run: pip install -r requirements.txt
@@ -45,7 +43,7 @@ jobs:
           python -m bgutil_ytdlp_pot_provider.server &
           echo "⏳ Waiting for PO token server..."
           sleep 5
-          echo "✅ PO token server ready"
+          echo "✅ PO token server ready on port 4416"
 
       - name: Download Short
         run: |
