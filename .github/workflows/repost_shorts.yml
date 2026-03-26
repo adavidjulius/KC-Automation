@@ -55,14 +55,34 @@ jobs:
       - name: ⬇️ Download Short via yt-dlp
         if: env.NO_SHORTS != 'true'
         run: |
+          echo "📥 Downloading: ${{ env.NEXT_URL }}"
+
           yt-dlp \
             --extractor-args "youtube:player-client=mweb,default;getpot_bgutil_baseurl=http://localhost:4416" \
             -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
             --merge-output-format mp4 \
             --no-playlist \
+            --no-part \
             --progress \
+            --print after_move:filepath \
             -o "video.mp4" \
             "${{ env.NEXT_URL }}"
+
+          # Rename if yt-dlp added extra extension
+          if [ ! -f "video.mp4" ]; then
+            FOUND=$(ls *.mp4 2>/dev/null | head -1)
+            if [ -n "$FOUND" ]; then
+              echo "⚠️ Renaming $FOUND → video.mp4"
+              mv "$FOUND" video.mp4
+            else
+              echo "❌ Download failed completely!"
+              exit 1
+            fi
+          fi
+
+          echo "✅ File ready:"
+          ls -lh video.mp4
+
 
       # ── 8. Verify download ─────────────────────────────────────────
       - name: ✅ Verify downloaded file
