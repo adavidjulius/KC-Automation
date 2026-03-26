@@ -1,5 +1,0 @@
-flask
-yt-dlp
-google-api-python-client
-google-auth
-requests
