@@ -1,2 +1,5 @@
 yt-dlp
-requests
+bgutil-ytdlp-pot-provider
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2
