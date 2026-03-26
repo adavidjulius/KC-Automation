@@ -1,27 +1,110 @@
-name: Daily Upload
+name: 🎬 YouTube Auto Repost
 
 on:
+  # Trigger manually with inputs
   workflow_dispatch:
-  schedule:
-    - cron: "0 10 * * *"
+    inputs:
+      video_url:
+        description: 'YouTube URL to download and repost'
+        required: true
+      title:
+        description: 'Video title for your channel'
+        required: true
+      description:
+        description: 'Video description'
+        required: false
+        default: 'Auto reposted via GitHub Actions'
+      privacy:
+        description: 'Privacy (public/unlisted/private)'
+        required: false
+        default: 'public'
+
+  # OR trigger via GitHub Issue
+  issues:
+    types: [opened]
 
 jobs:
-  run:
+  repost:
     runs-on: ubuntu-latest
+    timeout-minutes: 120  # 2 hour max
 
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout repo
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v4
-        with:
-          python-version: "3.11"
+      # Handle Issue trigger — extract URL from issue body
+      - name: Parse URL from Issue
+        if: github.event_name == 'issues'
+        id: issue_parse
+        run: |
+          TITLE="${{ github.event.issue.title }}"
+          BODY="${{ github.event.issue.body }}"
+          if [[ "$TITLE" == \[REPOST\]* ]]; then
+            URL=$(echo "$BODY" | grep -oP 'https?://(?:www\.)?youtu(?:be\.com/watch\?v=|\.be/)[\w-]+')
+            VID_TITLE="${TITLE#\[REPOST\] }"
+            echo "url=$URL" >> $GITHUB_OUTPUT
+            echo "title=$VID_TITLE" >> $GITHUB_OUTPUT
+          else
+            echo "Not a repost issue, skipping."
+            exit 0
+          fi
 
-      - run: pip install -r requirements.txt
+      - name: Set variables
+        id: vars
+        run: |
+          if [ "${{ github.event_name }}" == "issues" ]; then
+            echo "url=${{ steps.issue_parse.outputs.url }}" >> $GITHUB_OUTPUT
+            echo "title=${{ steps.issue_parse.outputs.title }}" >> $GITHUB_OUTPUT
+          else
+            echo "url=${{ github.event.inputs.video_url }}" >> $GITHUB_OUTPUT
+            echo "title=${{ github.event.inputs.title }}" >> $GITHUB_OUTPUT
+          fi
 
-      - run: python main.py
+      - name: Install ffmpeg
+        run: sudo apt-get install -y ffmpeg
+
+      - name: Install Python dependencies
+        run: pip install -r requirements.txt
+
+      - name: Start bgutil PO Token server
+        run: |
+          python -m bgutil_ytdlp_pot_provider.server &
+          echo "⏳ Waiting for PO token server to start..."
+          sleep 5
+          echo "✅ PO token server running on port 4416"
+
+      - name: Download YouTube video (no cookies needed)
+        run: |
+          yt-dlp \
+            --extractor-args "youtube:player-client=mweb,default;getpot_bgutil_baseurl=http://localhost:4416" \
+            -f "bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best" \
+            --merge-output-format mp4 \
+            --no-playlist \
+            --progress \
+            -o "video.mp4" \
+            "${{ steps.vars.outputs.url }}"
+
+      - name: Verify download
+        run: |
+          ls -lh video.mp4
+          echo "✅ Download successful!"
+
+      - name: Upload to YouTube channel
+        run: python upload.py
         env:
-          SOURCE_CHANNEL_ID: ${{ secrets.SOURCE_CHANNEL_ID }}
-          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
-          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
-          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
-          YOUTUBE_COOKIES: ${{ secrets.YOUTUBE_COOKIES }}
+          YOUTUBE_TOKEN: ${{ secrets.YOUTUBE_TOKEN }}
+          VIDEO_TITLE: ${{ steps.vars.outputs.title }}
+          VIDEO_DESC: ${{ github.event.inputs.description || 'Auto reposted via GitHub Actions' }}
+          PRIVACY: ${{ github.event.inputs.privacy || 'public' }}
+
+      - name: Comment on Issue with result
+        if: github.event_name == 'issues'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: '✅ Video has been successfully reposted to the channel!'
+            })
