@@ -45,7 +45,6 @@ jobs:
       - name: 🔍 Fetch next video from Drive
         run: python fetch_from_drive.py
         env:
-          YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
@@ -87,7 +86,6 @@ jobs:
         if: env.NO_VIDEOS != 'true'
         run: python upload.py
         env:
-          YOUTUBE_ACCESS_TOKEN:  ${{ secrets.YOUTUBE_ACCESS_TOKEN }}
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_CLIENT_ID:     ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
