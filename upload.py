@@ -14,24 +14,36 @@ creds = Credentials(
     client_secret=os.environ['YOUTUBE_CLIENT_SECRET']
 )
 
-# Auto refresh expired token
 if creds.expired or not creds.valid:
     creds.refresh(google.auth.transport.requests.Request())
-    print("🔄 Token refreshed successfully")
+    print("🔄 Token refreshed")
 
 youtube = build('youtube', 'v3', credentials=creds)
-print("✅ YouTube API client ready")
+print("✅ YouTube API ready")
 
-# ── Video Metadata ────────────────────────────────────────────────────
-title       = os.environ.get('VIDEO_TITLE', 'Auto Reposted Short')
-description = os.environ.get('VIDEO_DESC', 'Auto reposted via GitHub Actions 🤖 #Shorts')
-privacy     = os.environ.get('PRIVACY', 'public')
-next_id     = os.environ.get('NEXT_ID', '')
+# ── Metadata ──────────────────────────────────────────────────────────
+title    = os.environ.get('VIDEO_TITLE', 'Auto Reposted Short')
+desc     = os.environ.get('VIDEO_DESC',  'Auto reposted via GitHub Actions 🤖 #Shorts')
+privacy  = os.environ.get('PRIVACY',     'public')
+next_id  = os.environ.get('NEXT_ID',     '')
 
+print(f"📝 Title   : {title}")
+print(f"🔒 Privacy : {privacy}")
+
+# ── Verify File ───────────────────────────────────────────────────────
+video_file = "video.mp4"
+if not os.path.exists(video_file):
+    print("❌ video.mp4 not found!")
+    exit(1)
+
+size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 2)
+print(f"📦 File size: {size_mb} MB")
+
+# ── Upload ────────────────────────────────────────────────────────────
 body = {
     "snippet": {
         "title": title,
-        "description": description,
+        "description": desc,
         "tags": ["shorts", "repost", "auto", "viral"],
         "categoryId": "22",
         "defaultLanguage": "en",
@@ -44,23 +56,10 @@ body = {
     }
 }
 
-# ── Upload ────────────────────────────────────────────────────────────
-print(f"📤 Starting upload: {title}")
-print(f"🔒 Privacy: {privacy}")
-
-video_file = "video.mp4"
-
-if not os.path.exists(video_file):
-    print("❌ video.mp4 not found!")
-    exit(1)
-
-file_size = os.path.getsize(video_file)
-print(f"📦 File size: {round(file_size / (1024 * 1024), 2)} MB")
-
 media = MediaFileUpload(
     video_file,
     mimetype="video/mp4",
-    chunksize=10 * 1024 * 1024,  # 10MB chunks
+    chunksize=10 * 1024 * 1024,
     resumable=True
 )
 
@@ -70,40 +69,42 @@ req = youtube.videos().insert(
     media_body=media
 )
 
-# ── Upload Progress ───────────────────────────────────────────────────
+print("\n⬆️  Uploading to YouTube...")
 response = None
 while response is None:
     try:
         status, response = req.next_chunk()
         if status:
-            percent = int(status.progress() * 100)
-            print(f"⬆️  Upload progress: {percent}%")
+            print(f"   Progress: {int(status.progress() * 100)}%")
     except Exception as e:
-        print(f"⚠️  Chunk error (retrying): {e}")
+        print(f"⚠️  Retrying chunk: {e}")
         continue
 
-# ── Success ───────────────────────────────────────────────────────────
+# ── Result ────────────────────────────────────────────────────────────
 video_id = response['id']
 print(f"\n✅ Upload complete!")
 print(f"🎬 Video ID  : {video_id}")
-print(f"🔗 Short URL : https://youtube.com/shorts/{video_id}")
+print(f"🔗 Shorts URL: https://youtube.com/shorts/{video_id}")
 print(f"🔗 Watch URL : https://youtube.com/watch?v={video_id}")
 
 # ── Save to posted.json ───────────────────────────────────────────────
 posted_file = 'posted.json'
-
-if os.path.exists(posted_file):
-    with open(posted_file, 'r') as f:
-        posted = json.load(f)
-else:
-    posted = []
+posted = json.load(open(posted_file)) if os.path.exists(posted_file) else []
 
 if next_id and next_id not in posted:
     posted.append(next_id)
     with open(posted_file, 'w') as f:
         json.dump(posted, f, indent=2)
-    print(f"\n📝 Saved {next_id} to posted.json")
-else:
-    print(f"\n⚠️  NEXT_ID not set or already in posted.json, skipping save")
+    print(f"📝 Saved {next_id} to posted.json")
+
+# ── Delete from Drive after confirmed upload ──────────────────────────
+if next_id:
+    try:
+        drive = build('drive', 'v3', credentials=creds)
+        drive.files().delete(fileId=next_id).execute()
+        print(f"🗑️  Deleted from Drive: {next_id}")
+        print(f"💾 Drive space freed!")
+    except Exception as e:
+        print(f"⚠️  Drive delete failed (file kept): {e}")
 
 print("\n🎉 All done!")
