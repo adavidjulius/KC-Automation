@@ -1,31 +1,30 @@
 import os
 import json
-import google.auth.transport.requests
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 
-# ── Auth ──────────────────────────────────────────────────────────────
+# ── Auth — refresh_token only, no access_token needed ─────────────────
 creds = Credentials(
-    token=os.environ['YOUTUBE_ACCESS_TOKEN'],
+    token=None,
     refresh_token=os.environ['YOUTUBE_REFRESH_TOKEN'],
     token_uri="https://oauth2.googleapis.com/token",
     client_id=os.environ['YOUTUBE_CLIENT_ID'],
     client_secret=os.environ['YOUTUBE_CLIENT_SECRET']
 )
 
-if creds.expired or not creds.valid:
-    creds.refresh(google.auth.transport.requests.Request())
-    print("🔄 Token refreshed")
+creds.refresh(Request())
+print("✅ Auth ready — fresh token generated")
 
 youtube = build('youtube', 'v3', credentials=creds)
 print("✅ YouTube API ready")
 
 # ── Metadata ──────────────────────────────────────────────────────────
-title    = os.environ.get('VIDEO_TITLE', 'Auto Reposted Short')
-desc     = os.environ.get('VIDEO_DESC',  'Auto reposted via GitHub Actions 🤖 #Shorts')
-privacy  = os.environ.get('PRIVACY',     'public')
-next_id  = os.environ.get('NEXT_ID',     '')
+title   = os.environ.get('VIDEO_TITLE', 'Auto Reposted Short')
+desc    = os.environ.get('VIDEO_DESC',  'Auto reposted via GitHub Actions 🤖 #Shorts')
+privacy = os.environ.get('PRIVACY',     'public')
+next_id = os.environ.get('NEXT_ID',     '')
 
 print(f"📝 Title   : {title}")
 print(f"🔒 Privacy : {privacy}")
@@ -39,7 +38,7 @@ if not os.path.exists(video_file):
 size_mb = round(os.path.getsize(video_file) / (1024 * 1024), 2)
 print(f"📦 File size: {size_mb} MB")
 
-# ── Upload ────────────────────────────────────────────────────────────
+# ── Upload to YouTube ─────────────────────────────────────────────────
 body = {
     "snippet": {
         "title": title,
