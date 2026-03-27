@@ -5,6 +5,10 @@ on:
     - cron: '0 */6 * * *'
   workflow_dispatch:
 
+concurrency:
+  group: repost-job
+  cancel-in-progress: false
+
 jobs:
   repost:
     runs-on: ubuntu-latest
@@ -17,16 +21,27 @@ jobs:
       # ── 1. Checkout ────────────────────────────────────────────────
       - name: 📥 Checkout repo
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # ── 2. ffmpeg ──────────────────────────────────────────────────
+      # ── 2. Pull latest posted.json ─────────────────────────────────
+      - name: 🔄 Pull latest repo state
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git pull origin main --rebase
+          echo "📋 Current posted.json:"
+          cat posted.json
+
+      # ── 3. ffmpeg ──────────────────────────────────────────────────
       - name: 🎞️ Install ffmpeg
         uses: AnimMouse/setup-ffmpeg@v1
 
-      # ── 3. Python deps ─────────────────────────────────────────────
+      # ── 4. Python deps ─────────────────────────────────────────────
       - name: 📦 Install Python dependencies
         run: pip install -r requirements.txt
 
-      # ── 4. Fetch next video from Drive ─────────────────────────────
+      # ── 5. Fetch next video from Drive ─────────────────────────────
       - name: 🔍 Fetch next video from Drive
         run: python fetch_from_drive.py
         env:
@@ -36,26 +51,24 @@ jobs:
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           DRIVE_FOLDER_ID:       ${{ secrets.DRIVE_FOLDER_ID }}
 
-      # ── 5. Stop if nothing left ────────────────────────────────────
+      # ── 6. Stop if nothing left ────────────────────────────────────
       - name: 🏁 Stop if no videos left
         if: env.NO_VIDEOS == 'true'
         run: |
           echo "✅ All Drive videos posted. Nothing left!"
           exit 0
 
-      # ── 6. Verify video exists ─────────────────────────────────────
+      # ── 7. Verify video exists ─────────────────────────────────────
       - name: ✅ Verify video.mp4 exists
         if: env.NO_VIDEOS != 'true'
         run: |
           ls -lh video.mp4
-          echo "✅ File ready: ${{ env.NEXT_TITLE }}"
+          echo "✅ Ready: ${{ env.NEXT_TITLE }}"
 
-      # ── 7. Add logo watermark ──────────────────────────────────────
-      - name: 🎨 Add logo watermark (small, top-right, 80% opacity)
+      # ── 8. Add logo watermark ──────────────────────────────────────
+      - name: 🎨 Add logo watermark
         if: env.NO_VIDEOS != 'true'
         run: |
-          echo "🖼️ Overlaying logo..."
-
           ffmpeg -i video.mp4 -i logo.png \
             -filter_complex \
             "[1:v]scale=80:-1,format=rgba,colorchannelmixer=aa=0.8[logo];[0:v][logo]overlay=W-w-15:15" \
@@ -65,12 +78,11 @@ jobs:
             -c:a copy \
             -movflags +faststart \
             -y video_watermarked.mp4
-
           mv video_watermarked.mp4 video.mp4
           echo "✅ Logo added — small, top-right, 80% opacity"
           ls -lh video.mp4
 
-      # ── 8. Upload to YouTube ───────────────────────────────────────
+      # ── 9. Upload to YouTube ───────────────────────────────────────
       - name: 📤 Upload to YouTube channel
         if: env.NO_VIDEOS != 'true'
         run: python upload.py
@@ -84,12 +96,13 @@ jobs:
           PRIVACY:      "public"
           NEXT_ID:      ${{ env.NEXT_ID }}
 
-      # ── 9. Commit posted.json ──────────────────────────────────────
+      # ── 10. Commit posted.json ─────────────────────────────────────
       - name: 💾 Commit posted.json
         if: env.NO_VIDEOS != 'true'
         run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
           git add posted.json
           git diff --staged --quiet || git commit -m "✅ Posted: ${{ env.NEXT_TITLE }}"
-          git push
+          git pull --rebase origin main
+          git push origin main
+          echo "✅ posted.json updated:"
+          cat posted.json
