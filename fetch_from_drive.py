@@ -1,22 +1,21 @@
 import os
 import json
 import googleapiclient.http
-import google.auth.transport.requests
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
+from google.auth.transport.requests import Request
 
-# ── Auth ──────────────────────────────────────────────────────────────
+# ── Auth — refresh_token only, no access_token needed ─────────────────
 creds = Credentials(
-    token=os.environ['YOUTUBE_ACCESS_TOKEN'],
+    token=None,
     refresh_token=os.environ['YOUTUBE_REFRESH_TOKEN'],
     token_uri="https://oauth2.googleapis.com/token",
     client_id=os.environ['YOUTUBE_CLIENT_ID'],
     client_secret=os.environ['YOUTUBE_CLIENT_SECRET']
 )
 
-if creds.expired or not creds.valid:
-    creds.refresh(google.auth.transport.requests.Request())
-    print("🔄 Token refreshed")
+creds.refresh(Request())
+print("✅ Auth ready — fresh token generated")
 
 drive = build('drive', 'v3', credentials=creds)
 
