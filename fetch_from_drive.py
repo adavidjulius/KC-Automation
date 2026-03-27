@@ -1,6 +1,6 @@
 import os
 import json
-import requests
+import googleapiclient.http
 import google.auth.transport.requests
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
@@ -20,14 +20,13 @@ if creds.expired or not creds.valid:
 
 drive = build('drive', 'v3', credentials=creds)
 
-# ── List all videos in your Drive folder ──────────────────────────────
+# ── List all videos in Drive folder ───────────────────────────────────
 folder_id = os.environ['DRIVE_FOLDER_ID']
-
 print(f"📂 Scanning Drive folder: {folder_id}")
 
 results = drive.files().list(
     q=f"'{folder_id}' in parents and mimeType contains 'video/' and trashed=false",
-    orderBy="createdTime",       # oldest first
+    orderBy="createdTime",
     fields="files(id, name, createdTime, mimeType)",
     pageSize=100
 ).execute()
@@ -67,18 +66,10 @@ print(f"   Date : {next_video['createdTime']}")
 # ── Download video from Drive ─────────────────────────────────────────
 print(f"\n⬇️  Downloading from Drive...")
 
-request = drive.files().get_media(fileId=next_video['id'])
-
 with open('video.mp4', 'wb') as f:
-    downloader = request
-    response = drive.files().get_media(fileId=next_video['id'])
-    
-    # Stream download in chunks
-    import googleapiclient.http
     downloader = googleapiclient.http.MediaIoBaseDownload(
         f, drive.files().get_media(fileId=next_video['id'])
     )
-    
     done = False
     while not done:
         status, done = downloader.next_chunk()
@@ -87,7 +78,7 @@ with open('video.mp4', 'wb') as f:
 
 print("✅ Downloaded to video.mp4")
 
-# Strip file extension from name for title
+# ── Clean title ───────────────────────────────────────────────────────
 title = os.path.splitext(next_video['name'])[0]
 
 # ── Write to GitHub ENV ───────────────────────────────────────────────
