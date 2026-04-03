@@ -80,6 +80,15 @@ print("✅ Downloaded to video.mp4")
 # ── Clean title ───────────────────────────────────────────────────────
 title = os.path.splitext(next_video['name'])[0]
 
+# Remove NA_ prefix if present
+if title.upper().startswith('NA_'):
+    title = title[3:]
+
+# Replace underscores with spaces for cleaner title
+title = title.replace('_', ' ').strip()
+
+print(f"🏷️  Clean title: {title}")
+
 # ── Write to GitHub ENV ───────────────────────────────────────────────
 with open(os.environ['GITHUB_ENV'], 'a') as f:
     f.write(f"NEXT_ID={next_video['id']}\n")
