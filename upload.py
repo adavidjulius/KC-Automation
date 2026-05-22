@@ -21,8 +21,8 @@ youtube = build('youtube', 'v3', credentials=creds)
 print("✅ YouTube API ready")
 
 # ── Metadata ──────────────────────────────────────────────────────────
-title   = os.environ.get('VIDEO_TITLE', 'Auto Reposted Short')
-desc    = os.environ.get('VIDEO_DESC',  'Auto reposted via GitHub Actions 🤖 #Shorts')
+title   = os.environ.get('VIDEO_TITLE', '')
+desc    = os.environ.get('VIDEO_DESC',  '')
 privacy = os.environ.get('PRIVACY',     'public')
 next_id = os.environ.get('NEXT_ID',     '')
 
