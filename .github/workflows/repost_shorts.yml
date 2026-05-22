@@ -65,23 +65,6 @@ jobs:
           ls -lh video.mp4
           echo "✅ Ready: ${{ env.NEXT_TITLE }}"
 
-      # ── 8. Add logo watermark ──────────────────────────────────────
-      - name: 🎨 Add logo watermark
-        if: env.NO_VIDEOS != 'true'
-        run: |
-          ffmpeg -i video.mp4 -i logo.png \
-            -filter_complex \
-            "[1:v]scale=80:-1,format=rgba,colorchannelmixer=aa=0.8[logo];[0:v][logo]overlay=W-w-15:15" \
-            -c:v libx264 \
-            -preset ultrafast \
-            -crf 23 \
-            -c:a copy \
-            -movflags +faststart \
-            -y video_watermarked.mp4
-          mv video_watermarked.mp4 video.mp4
-          echo "✅ Logo added — small, top-right, 80% opacity"
-          ls -lh video.mp4
-
       # ── 9. Upload to YouTube ───────────────────────────────────────
       - name: 📤 Upload to YouTube channel
         if: env.NO_VIDEOS != 'true'
