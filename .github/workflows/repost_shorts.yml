@@ -2,7 +2,8 @@ name: 🎬 YouTube Shorts Auto Repost (From Drive)
 
 on:
   schedule:
-    - cron: '30 15 * * *'
+    - cron: '0 6 * * *'    # Runs at 11:30 AM IST (Education)
+    - cron: '45 12 * * *'  # Runs at 6:15 PM IST (Entertainment)
   workflow_dispatch:
 
 concurrency:
