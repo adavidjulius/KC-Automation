@@ -1,11 +1,12 @@
 import os
+import re
 import json
 import googleapiclient.http
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 
-# ── Auth — refresh_token only, no access_token needed ─────────────────
+# ── Auth ───────────────────────────────────────────────────────────────
 creds = Credentials(
     token=None,
     refresh_token=os.environ['YOUTUBE_REFRESH_TOKEN'],
@@ -13,7 +14,6 @@ creds = Credentials(
     client_id=os.environ['YOUTUBE_CLIENT_ID'],
     client_secret=os.environ['YOUTUBE_CLIENT_SECRET']
 )
-
 creds.refresh(Request())
 print("✅ Auth ready — fresh token generated")
 
@@ -39,12 +39,12 @@ if not all_videos:
         f.write("NO_VIDEOS=true\n")
     exit(0)
 
-# ── Load already posted ───────────────────────────────────────────────
+# ── Load already posted ────────────────────────────────────────────────
 posted_file = 'posted.json'
 posted = json.load(open(posted_file)) if os.path.exists(posted_file) else []
 print(f"✅ Already posted: {len(posted)} videos")
 
-# ── Pick next unposted video ──────────────────────────────────────────
+# ── Pick next unposted video ───────────────────────────────────────────
 next_video = None
 for video in all_videos:
     if video['id'] not in posted:
@@ -62,7 +62,7 @@ print(f"   Name : {next_video['name']}")
 print(f"   ID   : {next_video['id']}")
 print(f"   Date : {next_video['createdTime']}")
 
-# ── Download video from Drive ─────────────────────────────────────────
+# ── Download video from Drive ──────────────────────────────────────────
 print(f"\n⬇️  Downloading from Drive...")
 
 with open('video.mp4', 'wb') as f:
@@ -77,22 +77,31 @@ with open('video.mp4', 'wb') as f:
 
 print("✅ Downloaded to video.mp4")
 
-# ── Clean title ───────────────────────────────────────────────────────
-title = os.path.splitext(next_video['name'])[0]
+# ── Clean title ────────────────────────────────────────────────────────
+title = os.path.splitext(next_video['name'])[0]   # strip .mp4
 
-# Remove NA_ prefix if present
-if title.upper().startswith('NA_'):
-    title = title[3:]
+# FIX 1: Remove date prefix like "20240101_", "NA_", "RETRY_" (case-insensitive)
+title = re.sub(r'^(NA|RETRY|na|retry)_', '', title, flags=re.IGNORECASE)
+title = re.sub(r'^\d{8}_', '', title)              # remove YYYYMMDD_ date prefix
 
-# Replace underscores with spaces for cleaner title
+# Replace underscores with spaces
 title = title.replace('_', ' ').strip()
 
-print(f"🏷️  Clean title: {title}")
+# FIX 2: Truncate to 100 chars (YouTube title limit)
+title = title[:100].strip()
 
-# ── Write to GitHub ENV ───────────────────────────────────────────────
-with open(os.environ['GITHUB_ENV'], 'a') as f:
+# FIX 3: Sanitize for GitHub ENV — remove newlines and equals signs
+#         Use GitHub multiline syntax to handle any remaining special chars
+title_safe = title.replace('\n', ' ').replace('\r', ' ')
+
+print(f"🏷️  Clean title: {title_safe}")
+
+# ── Write to GitHub ENV (FIX 4: use multiline delimiter for safety) ────
+env_file = os.environ['GITHUB_ENV']
+with open(env_file, 'a') as f:
     f.write(f"NEXT_ID={next_video['id']}\n")
-    f.write(f"NEXT_TITLE={title}\n")
+    # Use EOF delimiter — safe even if title has = or special chars
+    f.write(f"NEXT_TITLE<<EOF\n{title_safe}\nEOF\n")
     f.write("NO_VIDEOS=false\n")
 
-print(f"\n✅ Ready to upload: {title}")
+print(f"\n✅ Ready to upload: {title_safe}")
